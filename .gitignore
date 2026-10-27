@@ -1,0 +1,13 @@
+# Build output
+bin/
+*.exe
+*.pdb
+
+# Generated icon (recreated by tools/make_icon.ps1 during build)
+assets/app.ico
+
+# IDE / OS
+.vs/
+*.user
+Thumbs.db
+desktop.ini

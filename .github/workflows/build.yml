@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Headless self-check
+        shell: pwsh
+        run: |
+          $out = & bin\DiskSpaceAnalyzer.exe --scan "$env:WINDIR\System32\drivers"
+          $out
+          if (-not ($out -match 'bytes')) { throw 'self-check produced no result' }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiskSpaceAnalyzer
+          path: bin/DiskSpaceAnalyzer.exe
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/DiskSpaceAnalyzer.exe
