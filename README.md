@@ -1,11 +1,16 @@
-# Disk Space Analyzer
+<p align="center">
+  <img src="assets/app.png" alt="Disk Space Analyzer logo" width="128" height="128">
+</p>
 
-A **free, open-source, fast** disk space analyzer and cleaner for Windows.
+<h1 align="center">Disk Space Analyzer</h1>
 
-Point it at a drive or folder, see exactly where your space went in a sortable
-size tree, then permanently delete what you don't need to reclaim space.
+<p align="center">A <b>free, open-source, fast</b> disk space analyzer and cleaner for Windows.</p>
 
-![screenshot](assets/screenshot.png)
+It starts analyzing your system drive the moment it opens. See exactly where
+your space went in a size tree, a contents list and a pie chart, then
+permanently delete what you don't need to reclaim space.
+
+![Disk Space Analyzer showing a drive with its size tree, contents list and pie chart (demo data)](assets/screenshot.png)
 
 ## Why
 
@@ -18,9 +23,22 @@ single-file GUI.
 
 - **Fast parallel scan** using the Win32 `FindFirstFileEx` API (basic info +
   large fetch) across multiple worker threads, aggregating sizes bottom-up.
-- **Size tree** of folders and subfolders with aligned **Size** and
-  **% of parent** columns; the contents list adds file/folder counts and is
-  sortable by any column.
+- **Starts analyzing right away:** the system drive is scanned as soon as the
+  app opens. Other local drives (second disks, USB/external drives) are listed
+  in the tree with their used space and are scanned only when you ask; drives
+  plugged in or removed while the app runs appear and disappear automatically.
+- **Scans in the background:** a progress bar under the toolbar shows how far
+  the scan is (for a whole drive, as a percentage of its used space), the file
+  and folder counts and the current folder, with **Cancel** for partial
+  results. You can keep browsing other drives meanwhile.
+- **Size tree** of drives, folders and subfolders with aligned **Size** and
+  **% of parent** columns plus a percentage bar; the contents list adds
+  file/folder counts and is sortable by any column.
+- **Pie chart pane** for the selected drive or folder: its biggest subfolders,
+  the files directly in it, and for a drive the space taken by system/unreadable
+  files and the **free space**. A capacity bar shows the drive's used and free
+  space for any selection. Click a slice to open that folder. The chart is
+  drawn from the sizes already in memory, so it never slows the scan.
 - **Folder contents** pane with owner-drawn percentage bars, plus a
   **Largest files (top 1000)** tab to find big files anywhere in the tree.
 - **Permanent delete** (bypasses the Recycle Bin) of files and folders, with a
@@ -28,9 +46,8 @@ single-file GUI.
 - **Correct and safe:** follows nothing through junctions/symlinks (their targets
   are never scanned or deleted), supports paths longer than 260 characters, and
   clears read-only attributes so deletes don't get stuck.
-- **Live progress** on a busy overlay with **Cancel** for partial results,
-  **Rescan folder**, **Show in Explorer**, **Copy path**, drag-and-drop a folder
-  onto the window, and an optional **Run as administrator** relaunch for
+- **Rescan folder**, **Show in Explorer**, **Copy path**, drag-and-drop a
+  folder onto the window, and an optional **Run as administrator** relaunch for
   protected folders.
 - **Dark, flat, rounded UI**: one blue accent, amber only for the destructive
   action, thin pill scrollbars, dark title bar and menus.
@@ -44,10 +61,12 @@ Nothing to install.
 
 ## Usage
 
-1. Pick a drive from the list or type/browse to a folder (or drag a folder onto
-   the window).
-2. Press **Scan** (or Enter).
-3. Explore the tree and the **Largest files** tab. Click column headers to sort.
+1. Start the app: it begins analyzing your system drive immediately.
+2. To analyze another drive, select it in the tree and press **Scan** (or
+   double-click it). To analyze any folder, type or browse to it, or drag it
+   onto the window, and press **Scan** (or Enter).
+3. Explore the tree, the pie chart and the **Largest files** tab. Click column
+   headers to sort, and chart slices to open a folder.
 4. Select items and press **Delete permanently** (or <kbd>Del</kbd>) to reclaim
    space. Use **Rescan folder** (<kbd>F5</kbd>) to refresh after changes outside
    the app.
@@ -93,11 +112,11 @@ from a console. Crashes are written to `DiskSpaceAnalyzer_error.txt`.
 - **Deleter** (`src/Deleter.cs`): custom recursive delete via `DeleteFileW` /
   `RemoveDirectoryW` so it isn't limited by `MAX_PATH` and removes reparse points
   as links rather than descending into them.
-- **UI** (`src/Theme.cs`, `src/Widgets.cs`, `src/Controls.cs`): palette and
-  fonts in one place; owner-drawn rounded buttons, panels, tabs, tree and list;
-  the native list/tree scrollbars are clipped away and replaced by pill
-  scrollbars that mirror and drive the native scroll position. Design notes are
-  in [APP_NOTES.md](APP_NOTES.md).
+- **UI** (`src/Theme.cs`, `src/Widgets.cs`, `src/Controls.cs`, `src/Chart.cs`):
+  palette and fonts in one place; owner-drawn rounded buttons, panels, tabs,
+  tree, list, scan bar and donut chart; the native list/tree scrollbars are
+  clipped away and replaced by pill scrollbars that mirror and drive the native
+  scroll position. Design notes are in [APP_NOTES.md](APP_NOTES.md).
 
 ## License
 

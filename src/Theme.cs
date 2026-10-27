@@ -23,6 +23,13 @@ namespace DiskSpaceAnalyzer
         public static readonly Color PILL = Hex(0x5c6470);
         public static readonly Color PILL_HOVER = Hex(0x7a828e);
 
+        // Data visualisation only (pie chart): shades of the accent, alternating light/dark so neighbours separate,
+        // plus greys for "free space" and catch-all slices.
+        public static readonly Color[] CHART = { Hex(0x4da3ff), Hex(0xa6cfff), Hex(0x2f78cc), Hex(0x7bbcff), Hex(0x1f5aa0), Hex(0xcfe4ff), Hex(0x5b95d6), Hex(0x8fb8e8) };
+        public static readonly Color CHART_FREE = Hex(0x4a525e);
+        public static readonly Color CHART_FILES = Hex(0x8a94a0);
+        public static readonly Color CHART_OTHER = Hex(0x6b7480);
+
         public static readonly Font FONT = new Font("Segoe UI", 10f);
         public static readonly Font FONT_11 = new Font("Segoe UI", 11f);
         public static readonly Font FONT_9 = new Font("Segoe UI", 9f);
@@ -153,6 +160,9 @@ namespace DiskSpaceAnalyzer
         }
 
         // ------------------------------------------------------------------ scroll interop
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT { public int L, T, R, B; }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct ScrollInfo

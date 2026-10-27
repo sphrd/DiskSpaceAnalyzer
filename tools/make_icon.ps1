@@ -85,3 +85,22 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Close()
 Write-Host "Wrote $out"
+
+# Social preview card (GitHub repo settings > Social preview, 1280x640): logo, name and tagline on the bg colour.
+$MUTED = [System.Drawing.ColorTranslator]::FromHtml('#aab4c0')
+$SURFACE = [System.Drawing.ColorTranslator]::FromHtml('#2d333d')
+$card = New-Object System.Drawing.Bitmap 1280, 640
+$g = [System.Drawing.Graphics]::FromImage($card)
+$g.SmoothingMode = 'AntiAlias'; $g.InterpolationMode = 'HighQualityBicubic'; $g.TextRenderingHint = 'AntiAliasGridFit'
+$g.Clear($BG)
+$g.DrawRectangle((New-Object System.Drawing.Pen $SURFACE, 4), 2, 2, 1275, 635)
+$logo = New-IconBitmap 288
+$g.DrawImage($logo, 96, 176, 288, 288); $logo.Dispose()
+$fmt = New-Object System.Drawing.StringFormat; $fmt.Trimming = 'None'
+$g.DrawString('Disk Space Analyzer', (New-Object System.Drawing.Font 'Segoe UI', 54, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)), (New-Object System.Drawing.SolidBrush $FG), 440, 214, $fmt)
+$g.DrawString('Fast disk space analyzer and cleaner for Windows', (New-Object System.Drawing.Font 'Segoe UI', 30, ([System.Drawing.GraphicsUnit]::Pixel)), (New-Object System.Drawing.SolidBrush $MUTED), 444, 298, $fmt)
+$g.DrawString('Free and open source  --  one small .exe, nothing to install', (New-Object System.Drawing.Font 'Segoe UI', 24, ([System.Drawing.GraphicsUnit]::Pixel)), (New-Object System.Drawing.SolidBrush $MUTED), 446, 352, $fmt)
+$g.FillRectangle((New-Object System.Drawing.SolidBrush $ACCENT), 446, 410, 120, 6)
+$g.Dispose()
+$card.Save((Join-Path $assets 'social-preview.png'), [System.Drawing.Imaging.ImageFormat]::Png); $card.Dispose()
+Write-Host "Wrote $(Join-Path $assets 'social-preview.png')"

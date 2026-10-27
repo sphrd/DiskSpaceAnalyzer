@@ -12,6 +12,20 @@ using System.Windows.Forms;
 
 namespace DiskSpaceAnalyzer
 {
+    /// <summary>A top-level entry of the tree: a drive (scanned or not) or a folder the user scanned.</summary>
+    internal sealed class ScanRoot
+    {
+        public string Path = "";
+        public bool IsDrive, IsSystem;
+        public string Label = "";
+        public long Total, Free;                 // capacity of the drive that holds Path (0 = unknown)
+        public DirNode Node;                     // null until scanned
+        public bool Scanning;
+        public List<FileEntry> Top = new List<FileEntry>();
+
+        public string DisplayName { get { return IsDrive && Label.Length > 0 ? Path + "  " + Label : Path; } }
+    }
+
     internal sealed class MainForm : Form
     {
         const string AppName = "Disk Space Analyzer";
@@ -20,7 +34,15 @@ namespace DiskSpaceAnalyzer
 
         readonly bool isAdmin;
 
-        DirNode root, current;
+        DirNode current;
+        readonly List<ScanRoot> roots = new List<ScanRoot>();
+        ScanRoot active;
+        bool drivesChanged;
+        bool scanning;
+        ScanRoot scanRoot;
+        ScanBar scanBar;
+        /// <summary>Scanned tree of the root that holds the current selection (null when that root is not scanned).</summary>
+        DirNode root { get { return active != null ? active.Node : null; } }
         List<FileEntry> topFiles = new List<FileEntry>();
         Scanner scanner;
         DeleteJob deleteJob;
@@ -31,7 +53,8 @@ namespace DiskSpaceAnalyzer
         readonly Label pathLabel;
         readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
         readonly Panel toolbar;
-        readonly SplitContainer split;
+        readonly SplitContainer split, split2;
+        readonly PieChart chart;
         readonly DarkTreeView tree;
         readonly TabStrip tabs;
         readonly ScrollHost contentsHost, largestHost;
@@ -53,8 +76,10 @@ namespace DiskSpaceAnalyzer
             BackColor = Theme.BG;
             ForeColor = Theme.FG;
             AutoScaleMode = AutoScaleMode.None;
-            Size = new Size(S(1240), S(780));
-            MinimumSize = new Size(S(760), S(460));
+            // 1500x880 by default, shrunk to fit the working area of smaller screens.
+            var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+            Size = new Size(Math.Min(S(1500), wa.Width - S(20)), Math.Min(S(880), wa.Height - S(20)));
+            MinimumSize = new Size(S(900), S(520));
             StartPosition = FormStartPosition.CenterScreen;
             KeyPreview = true;
             AllowDrop = true;
@@ -106,8 +131,8 @@ namespace DiskSpaceAnalyzer
                 miOpen.Enabled = any && sel.Count == 1;
                 miExplorer.Enabled = any;
                 miCopy.Enabled = any;
-                miRescan.Enabled = any && sel.Count == 1 && sel[0].IsDir;
-                miDelete.Enabled = any;
+                miRescan.Enabled = any && !scanning && sel.Count == 1 && sel[0].IsDir;
+                miDelete.Enabled = any && !scanning;
             };
 
             // Folder tree. The image list only reserves the icon slot; glyphs are drawn by the tree.
@@ -117,13 +142,21 @@ namespace DiskSpaceAnalyzer
                 ImageList = new ImageList { ImageSize = new Size(S(16), S(16)) }
             };
             tree.BeforeExpand += (s, e) => Populate(e.Node);
-            tree.AfterSelect += (s, e) => { var d = e.Node.Tag as DirNode; if (d != null) ShowContents(d); };
+            tree.AfterSelect += (s, e) =>
+            {
+                var d = e.Node.Tag as DirNode;
+                if (d != null) ShowContents(d);
+                else if (e.Node.Tag is ScanRoot) ShowUnscanned((ScanRoot)e.Node.Tag);
+            };
             tree.NodeMouseClick += (s, e) => { if (e.Button == MouseButtons.Right) tree.SelectedNode = e.Node; };
+            tree.NodeMouseDoubleClick += (s, e) => { var r = e.Node.Tag as ScanRoot; if (r != null) ScanPath(r.Path); };
             tree.Enter += (s, e) => lastView = tree;
             // Samples are the widest expected value or the header title, whichever is wider.
-            tree.ColumnSamples = new[] { "999.9 MB", "% of parent" };
+            tree.ColumnSamples = new[] { "999.9 MB", "100.0 %" };
             tree.ColumnMuted = new[] { false, true };
             tree.ColumnText = TreeColumns;
+            tree.BarColumn = 1;
+            tree.BarValue = TreeBar;
             var treePanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill, TrackFocus = true };
             treePanel.Controls.Add(new ScrollHost(tree) { Dock = DockStyle.Fill });
             treePanel.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(4), BackColor = Theme.SURFACE });
@@ -165,7 +198,18 @@ namespace DiskSpaceAnalyzer
             split.Panel1.BackColor = Theme.BG;
             split.Panel2.BackColor = Theme.BG;
             split.Panel1.Controls.Add(treePanel);
-            split.Panel2.Controls.Add(listPanel);
+
+            // Pie chart pane (right). It is drawn from sizes already in memory, never from the disk.
+            chart = new PieChart { Dock = DockStyle.Fill };
+            chart.SliceClicked += sl => { var d = sl.Tag as DirNode; if (d != null && !busy) SelectDir(d); };
+            var chartPanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill };
+            chartPanel.Controls.Add(chart);
+            split2 = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = S(10), BackColor = Theme.BG, FixedPanel = FixedPanel.Panel2 };
+            split2.Panel1.BackColor = Theme.BG;
+            split2.Panel2.BackColor = Theme.BG;
+            split2.Panel1.Controls.Add(listPanel);
+            split2.Panel2.Controls.Add(chartPanel);
+            split.Panel2.Controls.Add(split2);
 
             // Status line
             var status = new Panel { Dock = DockStyle.Bottom, Height = Theme.FONT_9.Height + S(16), BackColor = Theme.BG };
@@ -190,7 +234,17 @@ namespace DiskSpaceAnalyzer
                 overlay.CancelButton.Enabled = false;
             };
 
+            // Docking runs from the last-added control back: status (bottom), toolbar (top), scan bar (top, under the
+            // toolbar), then the panes fill the rest.
+            scanBar = new ScanBar { Dock = DockStyle.Top };
+            scanBar.CancelButton.Click += (s, e) =>
+            {
+                if (scanner == null) return;
+                scanner.Cancel();
+                scanBar.CancelButton.Enabled = false;
+            };
             Controls.Add(split);
+            Controls.Add(scanBar);
             Controls.Add(toolbar);
             Controls.Add(status);
             Controls.Add(overlay);
@@ -206,7 +260,7 @@ namespace DiskSpaceAnalyzer
             DragDrop += (s, e) =>
             {
                 var files = e.Data.GetData(DataFormats.FileDrop) as string[];
-                if (files == null || files.Length == 0 || busy) return;
+                if (files == null || files.Length == 0 || busy || scanning) return;
                 string p = files[0];
                 if (!Directory.Exists(p)) p = Path.GetDirectoryName(p);
                 pathBox.Text = p;
@@ -215,14 +269,13 @@ namespace DiskSpaceAnalyzer
 
             Shown += (s, e) =>
             {
-                split.SplitterDistance = S(380);
-                if (!string.IsNullOrEmpty(initialPath)) { pathBox.Text = initialPath; StartScan(); }
-                else
-                {
-                    string sys = Path.GetPathRoot(Environment.SystemDirectory);
-                    pathBox.Text = sys;
-                    pathBox.Box.Focus();
-                }
+                split.SplitterDistance = S(430);
+                split2.SplitterDistance = Math.Max(S(200), split2.Width - S(330) - split2.SplitterWidth);
+                LoadDrives();
+                RefreshTree(null);
+                // The system drive is analyzed automatically; other drives are listed and scanned on demand.
+                if (!string.IsNullOrEmpty(initialPath)) ScanPath(initialPath);
+                else ScanPath(Path.GetPathRoot(Environment.SystemDirectory));
             };
             FormClosing += (s, e) => { if (scanner != null) scanner.Cancel(); };
             UpdateButtons();
@@ -284,6 +337,8 @@ namespace DiskSpaceAnalyzer
             if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.F5) { RescanSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.Back) { GoUp(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Enter && lastView == tree && tree.SelectedNode != null && tree.SelectedNode.Tag is ScanRoot)
+            { ScanPath(((ScanRoot)tree.SelectedNode.Tag).Path); e.Handled = true; }
             else if (e.KeyCode == Keys.Enter && lastView != tree) { OpenSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.C && e.Control) { CopyPath(); e.Handled = true; }
         }
@@ -311,9 +366,17 @@ namespace DiskSpaceAnalyzer
             return path;
         }
 
+        void ScanPath(string path)
+        {
+            if (busy || scanning) return;
+            pathBox.Text = path;
+            StartScan();
+        }
+
+        /// <summary>Scans in the background; the window stays usable and the scan bar shows progress.</summary>
         async void StartScan()
         {
-            if (busy) return;
+            if (busy || scanning) return;
             string path;
             try { path = NormalizePath(pathBox.Text); }
             catch (Exception ex) { MessageBox.Show(this, "Invalid path: " + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
@@ -322,62 +385,283 @@ namespace DiskSpaceAnalyzer
                 MessageBox.Show(this, "Folder not found:\n" + path, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            pathBox.Text = path;
+            var r = FindRoot(path);
+            bool isNew = r == null;
+            if (isNew)
+            {
+                r = new ScanRoot { Path = path };
+                RefreshCapacity(r);
+                roots.Add(r);
+                SortRoots();
+            }
             var s = new Scanner(TopCount);
             scanner = s;
-            SetBusy(true);
-            pathBox.Text = path;
-            tree.Nodes.Clear();
-            contents.Items.Clear();
-            largest.Items.Clear();
-            root = current = null;
+            scanRoot = r;
+            r.Scanning = true;
+            var oldNode = r.Node;
+            SetScanning(true, "Scanning " + r.Path + "...");
+            // Show the root being scanned unless the user is already looking at something else that is scanned.
+            RefreshTree(current);
+            if (current == null || current.Top == oldNode) { if (oldNode == null) SelectRoot(r); }
+
             var sw = Stopwatch.StartNew();
             DirNode result = null;
+            Exception error = null;
             try { await RunThread(() => result = s.Run(path)); }
-            catch (Exception ex)
+            catch (Exception ex) { error = ex; }
+            sw.Stop();
+            r.Scanning = false;
+            scanner = null;
+            scanRoot = null;
+            SetScanning(false, null);
+            if (error != null)
             {
-                SetBusy(false);
-                MessageBox.Show(this, "Scan failed: " + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (isNew) roots.Remove(r);
+                RefreshTree(current);
+                MessageBox.Show(this, "Scan failed: " + error.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-            sw.Stop();
-            root = result;
-            topFiles = s.TopFiles;
-            SetBusy(false);
-            RefreshTree(root);
-            FillLargest();
+
+            r.Node = result;
+            r.Top = s.TopFiles;
+            RefreshCapacity(r);
+            // Keep the user's place: map a selection inside the old tree onto the new one; otherwise stay put,
+            // unless nothing scanned was selected (e.g. at startup), then open the new result.
+            DirNode target;
+            if (current != null && oldNode != null && current.Top == oldNode) target = FindByPath(result, current.FullPath) ?? result;
+            else if (active != null && active != r) target = current;   // browsing another drive: stay there
+            else target = result;
+            if (active == r) { topFiles = r.Top; current = null; }
+            RefreshTree(target);
+            if (active == r) FillLargest();
             UpdateDriveLabel();
             statusLabel.Text = string.Format("{0}: {1} in {2:N0} files and {3:N0} folders - scanned in {4:0.00} s{5}",
-                root.Name, Fmt.Size(root.Size), root.Files, root.Dirs, sw.Elapsed.TotalSeconds,
+                result.Name, Fmt.Size(result.Size), result.Files, result.Dirs, sw.Elapsed.TotalSeconds,
                 s.Cancelled ? "  (stopped - partial results)" : "");
-            scanner = null;
         }
 
+        /// <summary>Deepest scanned folder under root that matches fullPath (root itself if nothing deeper matches).</summary>
+        static DirNode FindByPath(DirNode root, string fullPath)
+        {
+            string rp = root.FullPath.TrimEnd('\\');
+            if (!fullPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase)) return null;
+            var node = root;
+            foreach (var part in fullPath.Substring(rp.Length).Split(new[] { '\\' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                DirNode next = null;
+                if (node.Children != null)
+                    foreach (var c in node.Children)
+                        if (string.Equals(c.Name, part, StringComparison.OrdinalIgnoreCase)) { next = c; break; }
+                if (next == null) break;
+                node = next;
+            }
+            return node;
+        }
+
+        // ---------------------------------------------------------------- drives and scan roots
+
+        static bool SamePath(string a, string b)
+        {
+            return string.Equals(a.TrimEnd('\\'), b.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        }
+
+        ScanRoot FindRoot(string path) { return roots.FirstOrDefault(r => SamePath(r.Path, path)); }
+
+        ScanRoot RootOf(DirNode top) { return top == null ? null : roots.FirstOrDefault(r => r.Node == top); }
+
+        void SortRoots()
+        {
+            roots.Sort((a, b) =>
+            {
+                if (a.IsSystem != b.IsSystem) return a.IsSystem ? -1 : 1;
+                if (a.IsDrive != b.IsDrive) return a.IsDrive ? -1 : 1;
+                return string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        static void RefreshCapacity(ScanRoot r)
+        {
+            try
+            {
+                var d = new DriveInfo(Path.GetPathRoot(r.Path));
+                if (!d.IsReady) return;
+                r.Total = d.TotalSize;
+                r.Free = d.TotalFreeSpace;
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>Adds ready drives, drops drives that went away (e.g. an unplugged USB disk).</summary>
+        void LoadDrives()
+        {
+            string sys = Path.GetPathRoot(Environment.SystemDirectory);
+            var ready = new List<DriveInfo>();
+            foreach (var d in DriveInfo.GetDrives())
+            {
+                // Mapped network drives are not listed: checking a disconnected share can block for seconds.
+                // A network path can still be typed into the path box and scanned.
+                if (d.DriveType == DriveType.Network) continue;
+                try { if (d.IsReady) ready.Add(d); } catch (Exception) { }
+            }
+            roots.RemoveAll(r => r.IsDrive && !ready.Any(d => SamePath(d.Name, r.Path)));
+            foreach (var d in ready)
+            {
+                var r = FindRoot(d.Name);
+                if (r == null) { r = new ScanRoot { Path = d.Name }; roots.Add(r); }
+                r.IsDrive = true;
+                r.IsSystem = SamePath(d.Name, sys);
+                string label = "";
+                try { label = d.VolumeLabel; } catch (Exception) { }
+                string kind = d.DriveType == DriveType.Removable ? "removable" : d.DriveType == DriveType.Network ? "network"
+                    : d.DriveType == DriveType.CDRom ? "optical" : "";
+                if (string.IsNullOrEmpty(label)) label = d.DriveType == DriveType.Fixed ? "Local disk" : "";
+                r.Label = label + (kind.Length > 0 ? (label.Length > 0 ? " - " : "") + kind : "");
+                RefreshCapacity(r);
+            }
+            if (active != null && !roots.Contains(active)) { active = null; current = null; }
+            SortRoots();
+            pathBox.Choices.Clear();
+            foreach (var r in roots) if (r.IsDrive) pathBox.Choices.Add(r.Path);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            // WM_DEVICECHANGE: DBT_DEVICEARRIVAL / DBT_DEVICEREMOVECOMPLETE -> refresh the drive list.
+            if (m.Msg == 0x219 && (m.WParam == (IntPtr)0x8000 || m.WParam == (IntPtr)0x8004))
+            {
+                if (busy || scanning) drivesChanged = true;
+                else BeginInvoke(new Action(RefreshDrives));
+            }
+        }
+
+        void RefreshDrives()
+        {
+            if (busy || scanning) { drivesChanged = true; return; }
+            drivesChanged = false;
+            LoadDrives();
+            RefreshTree(current);
+        }
+
+        void ShowUnscanned(ScanRoot r)
+        {
+            current = null;
+            active = r;
+            topFiles = r.Top;
+            RefreshCapacity(r);
+            if (!busy) pathBox.Text = r.Path;
+            contents.Items.Clear();
+            contents.EmptyText = r.Scanning
+                ? "Scanning " + r.DisplayName + "...\nThe results appear here when the scan finishes. You can browse other drives meanwhile."
+                : r.DisplayName + " has not been scanned yet.\nPress Scan, or double-click the drive, to analyze it.";
+            contents.Invalidate();
+            FillLargest();
+            tabs.SetTitle(0, "Folder contents: " + r.Path + (r.Scanning ? "  (scanning...)" : "  (not scanned)"));
+            UpdateChartUnscanned(r);
+            UpdateDriveLabel();
+            UpdateButtons();
+        }
+
+        // ---------------------------------------------------------------- pie chart
+
+        void UpdateChart(DirNode d)
+        {
+            var r = RootOf(d.Top);
+            if (r != null) RefreshCapacity(r);
+            var slices = new List<ChartSlice>();
+            long dirsTotal = 0, shown = 0;
+            if (d.Children != null)
+                foreach (var c in d.Children)
+                {
+                    dirsTotal += c.Size;
+                    if (slices.Count < 6 && c.Size > 0)
+                    {
+                        slices.Add(new ChartSlice { Label = c.Name, Size = c.Size, Color = Theme.CHART[slices.Count % Theme.CHART.Length], Tag = c });
+                        shown += c.Size;
+                    }
+                }
+            if (dirsTotal - shown > 0) slices.Add(new ChartSlice { Label = "Other folders", Size = dirsTotal - shown, Color = Theme.CHART_OTHER });
+            if (d.LocalSize > 0) slices.Add(new ChartSlice { Label = "Files in this folder", Size = d.LocalSize, Color = Theme.CHART_FILES });
+
+            bool driveRoot = d.Parent == null && r != null && r.IsDrive && r.Total > 0;
+            string title = d.Parent == null && r != null ? r.DisplayName : d.Name, sub = d.FullPath;
+            if (driveRoot)
+            {
+                long used = r.Total - r.Free;
+                if (used - d.Size > 0)
+                    slices.Add(new ChartSlice { Label = "System / not readable", Size = used - d.Size, Color = Theme.PILL });
+                slices.Add(new ChartSlice { Label = "Free space", Size = r.Free, Color = Theme.CHART_FREE });
+                sub = string.Format("{0} used of {1}", Fmt.Size(used), Fmt.Size(r.Total));
+            }
+            if (r != null && r.Total > 0)
+                chart.SetData(title, sub, slices,
+                    string.Format("{0}  {1} here  -  {2} free of {3}", Path.GetPathRoot(r.Path), Fmt.Size(d.Size), Fmt.Size(r.Free), Fmt.Size(r.Total)),
+                    r.Total, r.Free, d.Size);
+            else
+                chart.SetData(title, sub, slices, "", 0, 0, 0);
+        }
+
+        void UpdateChartUnscanned(ScanRoot r)
+        {
+            if (r.Total <= 0) { chart.SetData(r.DisplayName, "Not scanned", new List<ChartSlice>(), "", 0, 0, 0); return; }
+            long used = r.Total - r.Free;
+            var slices = new List<ChartSlice>
+            {
+                new ChartSlice { Label = "Used (not scanned yet)", Size = used, Color = Theme.CHART[0] },
+                new ChartSlice { Label = "Free space", Size = r.Free, Color = Theme.CHART_FREE }
+            };
+            chart.SetData(r.DisplayName, string.Format("{0} used of {1}  -  {2}", Fmt.Size(used), Fmt.Size(r.Total), r.Scanning ? "scanning..." : "not scanned"), slices,
+                "", 0, 0, 0);
+        }
+
+        /// <summary>Blocking work (permanent delete): full-window overlay.</summary>
         void SetBusy(bool value)
         {
             busy = value;
             if (value)
             {
-                overlay.ShowBusy("Starting...", scanner != null);
+                overlay.ShowBusy("Starting...", false);
                 uiTimer.Start();
             }
             else
             {
-                uiTimer.Stop();
+                if (!scanning) uiTimer.Stop();
                 overlay.HideBusy();
             }
             split.Enabled = !value;
             UpdateButtons();
+            if (!value && drivesChanged) BeginInvoke(new Action(RefreshDrives));
+        }
+
+        /// <summary>Background scan: the scan bar shows progress; browsing stays possible, changes to the disk do not.</summary>
+        void SetScanning(bool value, string text)
+        {
+            scanning = value;
+            if (value)
+            {
+                scanBar.Start(text);
+                uiTimer.Start();
+            }
+            else
+            {
+                if (!busy) uiTimer.Stop();
+                scanBar.Stop();
+            }
+            UpdateButtons();
+            if (!value && drivesChanged) BeginInvoke(new Action(RefreshDrives));
         }
 
         void UpdateButtons()
         {
-            btnScan.Enabled = !busy;
-            btnBrowse.Enabled = !busy;
+            bool idle = !busy && !scanning;
+            btnScan.Enabled = idle;
+            btnBrowse.Enabled = idle;
             pathBox.Enabled = !busy;
             btnUp.Enabled = !busy && current != null && current.Parent != null;
-            btnRescan.Enabled = !busy && root != null;
+            btnRescan.Enabled = idle && root != null;
             btnExplorer.Enabled = !busy && root != null;
-            btnDelete.Enabled = !busy && root != null;
+            btnDelete.Enabled = idle && root != null;
         }
 
         void UpdateProgress()
@@ -386,23 +670,36 @@ namespace DiskSpaceAnalyzer
             var j = deleteJob;
             if (s != null)
             {
-                string text = s.Cancelled
-                    ? "Cancelling... (finishing current folder)"
-                    : string.Format("Scanning: {0:N0} folders, {1:N0} files, {2} so far",
-                        Interlocked.Read(ref s.DirsSeen), Interlocked.Read(ref s.FilesSeen), Fmt.Size(Interlocked.Read(ref s.BytesSeen)));
-                overlay.SetStatus(text, Fmt.Shorten(s.Current, 80));
+                var r = scanRoot;
+                long bytes = Interlocked.Read(ref s.BytesSeen);
+                string where = r != null ? r.Path : "";
+                string detail = string.Format("{0:N0} files, {1:N0} folders  --  {2}",
+                    Interlocked.Read(ref s.FilesSeen), Interlocked.Read(ref s.DirsSeen), Fmt.Shorten(s.Current, 90));
+                // A whole drive has a known total (its used space), so the bar can show real progress.
+                bool driveRoot = r != null && r.IsDrive && r.Total > 0 && SamePath(r.Path, s.RootPath ?? "");
+                long used = driveRoot ? r.Total - r.Free : 0;
+                if (s.Cancelled)
+                    scanBar.SetProgress("Cancelling... (finishing current folder)", detail, -1);
+                else if (used > 0)
+                {
+                    double frac = Math.Min(0.99, (double)bytes / used);
+                    scanBar.SetProgress(string.Format("Scanning {0}: {1} of {2} done ({3:0} %)", where, Fmt.Size(bytes), Fmt.Size(used), frac * 100),
+                        detail, frac);
+                }
+                else
+                    scanBar.SetProgress(string.Format("Scanning {0}: {1} so far", Fmt.Shorten(s.RootPath ?? where, 60), Fmt.Size(bytes)), detail, -1);
             }
-            else if (j != null)
+            if (j != null)
                 overlay.SetStatus(string.Format("Deleting: {0:N0} files removed", Interlocked.Read(ref j.FilesDeleted)), Fmt.Shorten(j.Current, 80));
         }
 
         void UpdateDriveLabel()
         {
             driveLabel.Text = "";
-            if (root == null) return;
+            if (active == null) return;
             try
             {
-                var d = new DriveInfo(Path.GetPathRoot(root.FullPath));
+                var d = new DriveInfo(Path.GetPathRoot(active.Path));
                 driveLabel.Text = string.Format("{0}  {1} free of {2} ({3:0}% free)", d.Name, Fmt.Size(d.AvailableFreeSpace),
                     Fmt.Size(d.TotalSize), 100.0 * d.AvailableFreeSpace / Math.Max(1, d.TotalSize));
             }
@@ -423,7 +720,7 @@ namespace DiskSpaceAnalyzer
         void RestartAsAdmin()
         {
             string arg = "";
-            string p = root != null ? root.FullPath : pathBox.Text.Trim();
+            string p = active != null ? active.Path : pathBox.Text.Trim();
             if (p.Length > 0) arg = "\"" + p.TrimEnd('\\') + "\"";
             try
             {
@@ -440,12 +737,27 @@ namespace DiskSpaceAnalyzer
             return d.Denied ? d.Name + "  [access denied]" : d.Name;
         }
 
-        static string[] TreeColumns(TreeNode tn)
+        string[] TreeColumns(TreeNode tn)
         {
+            var r = tn.Tag as ScanRoot;
+            if (r != null)
+                return r.Total > 0 ? new[] { Fmt.Size(r.Total - r.Free), string.Format("{0:0.0} %", 100.0 * (r.Total - r.Free) / r.Total) } : null;
             var d = tn.Tag as DirNode;
             if (d == null) return null;
-            string pct = d.Parent != null && d.Parent.Size > 0 ? string.Format("{0:0.0} %", 100.0 * d.Size / d.Parent.Size) : "";
-            return new[] { Fmt.Size(d.Size), pct };
+            double pct = TreeBar(tn);
+            return new[] { Fmt.Size(d.Size), pct >= 0 ? string.Format("{0:0.0} %", pct) : "" };
+        }
+
+        /// <summary>Percentage shown as a bar: share of the parent folder; for a scanned drive, share of the drive capacity.</summary>
+        double TreeBar(TreeNode tn)
+        {
+            var r = tn.Tag as ScanRoot;
+            if (r != null) return r.Total > 0 ? 100.0 * (r.Total - r.Free) / r.Total : -1;
+            var d = tn.Tag as DirNode;
+            if (d == null) return -1;
+            if (d.Parent != null) return d.Parent.Size > 0 ? 100.0 * d.Size / d.Parent.Size : 0;
+            var top = RootOf(d);
+            return top != null && top.IsDrive && top.Total > 0 ? 100.0 * d.Size / top.Total : -1;
         }
 
         static TreeNode MakeTreeNode(DirNode d)
@@ -454,6 +766,17 @@ namespace DiskSpaceAnalyzer
             if (d.Denied) tn.ForeColor = Theme.MUTED;
             if (d.Children != null && d.Children.Count > 0) tn.Nodes.Add(new TreeNode("..."));
             return tn;
+        }
+
+        static TreeNode MakeRootNode(ScanRoot r)
+        {
+            if (r.Node != null)
+            {
+                var tn = MakeTreeNode(r.Node);
+                tn.Text = r.DisplayName + (r.Scanning ? "  (rescanning...)" : "");
+                return tn;
+            }
+            return new TreeNode(r.DisplayName + (r.Scanning ? "  (scanning...)" : "  (not scanned)")) { Tag = r, ForeColor = Theme.MUTED };
         }
 
         static void Populate(TreeNode tn)
@@ -466,25 +789,43 @@ namespace DiskSpaceAnalyzer
 
         bool IsAttached(DirNode d)
         {
-            return d != null && root != null && d.Top == root;
+            return d != null && RootOf(d.Top) != null;
         }
 
-        /// <summary>Rebuilds the tree from the model, keeping expanded folders, then selects target.</summary>
+        /// <summary>Rebuilds the tree (one top-level node per drive or scanned folder), keeping expanded folders, then selects target.</summary>
         void RefreshTree(DirNode target)
         {
             var expanded = new HashSet<DirNode>();
             CollectExpanded(tree.Nodes, expanded);
             tree.BeginUpdate();
             tree.Nodes.Clear();
-            if (root != null)
+            foreach (var r in roots)
             {
-                var rn = MakeTreeNode(root);
+                var rn = MakeRootNode(r);
                 tree.Nodes.Add(rn);
-                rn.Expand();
-                foreach (TreeNode c in rn.Nodes) ReExpand(c, expanded);
+                if (r.Node == null) continue;
+                bool targetHere = target != null && target.Top == r.Node;
+                if (targetHere || expanded.Contains(r.Node))
+                {
+                    rn.Expand();
+                    foreach (TreeNode c in rn.Nodes) ReExpand(c, expanded);
+                }
             }
             tree.EndUpdate();
-            if (root != null) SelectDir(IsAttached(target) ? target : root);
+            if (target != null && IsAttached(target)) SelectDir(target);
+            else if (active != null && roots.Contains(active)) SelectRoot(active);
+            else if (roots.Count > 0) SelectRoot(roots[0]);
+        }
+
+        void SelectRoot(ScanRoot r)
+        {
+            if (r.Node != null) { SelectDir(r.Node); return; }
+            foreach (TreeNode tn in tree.Nodes)
+                if (tn.Tag == r)
+                {
+                    if (tree.SelectedNode == tn) ShowUnscanned(r); else tree.SelectedNode = tn;
+                    return;
+                }
         }
 
         static void CollectExpanded(TreeNodeCollection nodes, HashSet<DirNode> set)
@@ -510,7 +851,9 @@ namespace DiskSpaceAnalyzer
             if (tree.Nodes.Count == 0 || target == null) return;
             var chain = new List<DirNode>();
             for (var n = target; n != null; n = n.Parent) chain.Insert(0, n);
-            TreeNode cur = tree.Nodes[0];
+            TreeNode cur = null;
+            foreach (TreeNode tn in tree.Nodes) if (tn.Tag == chain[0]) { cur = tn; break; }
+            if (cur == null) return;
             for (int i = 1; i < chain.Count; i++)
             {
                 cur.Expand();
@@ -527,6 +870,17 @@ namespace DiskSpaceAnalyzer
         void ShowContents(DirNode d)
         {
             current = d;
+            var r = RootOf(d.Top);
+            if (r != null && r != active)
+            {
+                active = r;
+                topFiles = r.Top;
+                FillLargest();
+                UpdateDriveLabel();
+                if (!busy) pathBox.Text = r.Path;
+            }
+            contents.EmptyText = null;
+            UpdateChart(d);
             var items = new List<ItemInfo>();
             if (d.Children != null) foreach (var c in d.Children) items.Add(ItemInfo.ForDir(c, d.Size));
             var files = Scanner.ListFiles(d);
@@ -658,9 +1012,16 @@ namespace DiskSpaceAnalyzer
                 if (a.Children != null) a.Children.Sort(DirNode.BySizeDesc);
         }
 
+        /// <summary>Largest-files list of the root that holds d (the active list if d is detached).</summary>
+        List<FileEntry> TopOf(DirNode d)
+        {
+            var r = RootOf(d.Top);
+            return r != null ? r.Top : topFiles;
+        }
+
         void RemoveNode(DirNode dn)
         {
-            topFiles.RemoveAll(f => f.Dir.IsUnder(dn));
+            TopOf(dn).RemoveAll(f => f.Dir.IsUnder(dn));
             var p = dn.Parent;
             if (p == null) return;
             p.Children.Remove(dn);
@@ -671,9 +1032,10 @@ namespace DiskSpaceAnalyzer
 
         void ReplaceNode(DirNode old, DirNode fresh, List<FileEntry> freshTop)
         {
-            topFiles.RemoveAll(f => f.Dir.IsUnder(old));
+            var list = TopOf(old);
+            list.RemoveAll(f => f.Dir.IsUnder(old));
             var p = old.Parent;
-            if (p == null) root = fresh;
+            if (p == null) { var r = RootOf(old); if (r != null) r.Node = fresh; }
             else
             {
                 fresh.Name = old.Name;
@@ -684,9 +1046,9 @@ namespace DiskSpaceAnalyzer
                 ResortUp(p);
                 old.Parent = null;
             }
-            topFiles.AddRange(freshTop);
-            topFiles.Sort(FileEntry.BySizeDesc);
-            if (topFiles.Count > TopCount) topFiles.RemoveRange(TopCount, topFiles.Count - TopCount);
+            list.AddRange(freshTop);
+            list.Sort(FileEntry.BySizeDesc);
+            if (list.Count > TopCount) list.RemoveRange(TopCount, list.Count - TopCount);
         }
 
         void RemoveFile(FileEntry f)
@@ -697,29 +1059,40 @@ namespace DiskSpaceAnalyzer
             d.LocalFiles--;
             for (var a = d; a != null; a = a.Parent) { a.Size -= f.Size; a.Files--; }
             ResortUp(d.Parent);
-            topFiles.RemoveAll(t => t.Dir == d && string.Equals(t.Name, f.Name, StringComparison.OrdinalIgnoreCase));
+            TopOf(d).RemoveAll(t => t.Dir == d && string.Equals(t.Name, f.Name, StringComparison.OrdinalIgnoreCase));
         }
 
         async void RescanSelected()
         {
-            if (busy || root == null) return;
+            if (busy || scanning || root == null) return;
             var sel = GetSelection();
             DirNode dir = sel.Count == 1 && sel[0].IsDir ? sel[0].Dir : current;
             if (dir == null) return;
-            if (dir == root) { pathBox.Text = root.FullPath; StartScan(); return; }
+            if (dir.Parent == null) { var rr = RootOf(dir); ScanPath(rr != null ? rr.Path : dir.FullPath); return; }
 
             string path = dir.FullPath;
+            var owner = RootOf(dir.Top);
             var s = new Scanner(TopCount);
             scanner = s;
-            SetBusy(true);
+            scanRoot = owner;
+            SetScanning(true, "Rescanning " + Fmt.Shorten(path, 80) + "...");
             DirNode fresh = null;
             var sw = Stopwatch.StartNew();
             try { await RunThread(() => fresh = s.Run(path)); }
-            finally { scanner = null; SetBusy(false); }
+            finally { scanner = null; scanRoot = null; SetScanning(false, null); }
 
-            DirNode target;
-            if (!Native.Exists(path)) { target = dir.Parent; RemoveNode(dir); }
-            else { ReplaceNode(dir, fresh, s.TopFiles); target = fresh; }
+            // Stay where the user is; if they are inside the rescanned folder, follow them into the new copy.
+            bool inside = current != null && current.IsUnder(dir);
+            string here = inside ? current.FullPath : null;
+            DirNode target = current;
+            if (!Native.Exists(path)) { if (inside) target = dir.Parent; RemoveNode(dir); }
+            else
+            {
+                ReplaceNode(dir, fresh, s.TopFiles);
+                if (inside) target = FindByPath(fresh, here) ?? fresh;
+            }
+            if (target == null || !IsAttached(target)) target = dir.Parent;
+            current = null;
             RefreshTree(target);
             FillLargest();
             UpdateDriveLabel();
@@ -728,10 +1101,10 @@ namespace DiskSpaceAnalyzer
 
         async void DeleteSelected()
         {
-            if (busy || root == null) return;
+            if (busy || scanning || root == null) return;
             var sel = GetSelection();
             if (sel.Count == 0) return;
-            if (sel.Any(i => i.IsDir && i.Dir == root))
+            if (sel.Any(i => i.IsDir && i.Dir.Parent == null))
             {
                 MessageBox.Show(this, "The scanned root folder itself cannot be deleted here.\nSelect items inside it instead.",
                     AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);

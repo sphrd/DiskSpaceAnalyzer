@@ -3,9 +3,9 @@ bin/
 *.exe
 *.pdb
 
-# Generated icon (recreated by tools/make_icon.ps1 during build)
+# Generated icon (recreated by tools/make_icon.ps1 during build). app.png and social-preview.png are committed
+# because the README and the repository page show them.
 assets/app.ico
-assets/app.png
 
 # IDE / OS
 .vs/

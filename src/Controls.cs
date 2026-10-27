@@ -172,10 +172,32 @@ namespace DiskSpaceAnalyzer
             switch (m.Msg)
             {
                 case 0x0F: case 0x114: case 0x115: case 0x20A: case 0x20E: case 0x05:
+                    if (m.Msg == 0x0F && Items.Count == 0 && !string.IsNullOrEmpty(EmptyText)) DrawEmptyText();
                     if (ScrollChanged != null) ScrollChanged(this, EventArgs.Empty);
                     break;
             }
         }
+
+        /// <summary>Hint shown in the empty list (e.g. for a drive that has not been scanned).</summary>
+        public string EmptyText;
+
+        void DrawEmptyText()
+        {
+            int top = Theme.S(28);
+            if (header != null)
+            {
+                Theme.RECT hr;
+                if (GetWindowRect(header.Handle, out hr)) top = hr.B - hr.T;
+            }
+            using (var g = Graphics.FromHwnd(Handle))
+            {
+                var r = new Rectangle(Theme.S(16), top + Theme.S(24), Math.Max(0, ClientSize.Width - Theme.S(32)), Theme.S(80));
+                TextRenderer.DrawText(g, EmptyText, Font, r, Theme.MUTED, TextFormatFlags.HorizontalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool GetWindowRect(IntPtr hwnd, out Theme.RECT rect);
 
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }

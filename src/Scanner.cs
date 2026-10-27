@@ -146,6 +146,7 @@ namespace DiskSpaceAnalyzer
     {
         public long FilesSeen, DirsSeen, BytesSeen;
         public volatile string Current = "";
+        public string RootPath;
 
         readonly BlockingCollection<DirNode> queue = new BlockingCollection<DirNode>(new ConcurrentStack<DirNode>());
         readonly TopFiles top;
@@ -160,6 +161,7 @@ namespace DiskSpaceAnalyzer
 
         public DirNode Run(string path)
         {
+            RootPath = path;
             var root = new DirNode { Name = path };
             queue.Add(root);
             int n = Math.Min(32, Math.Max(8, 2 * Environment.ProcessorCount));

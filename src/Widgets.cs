@@ -538,6 +538,7 @@ namespace DiskSpaceAnalyzer
         public Spinner()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.BG;
             timer.Tick += (s, e) => { angle = (angle + 18) % 360; Invalidate(); };
         }
 
@@ -550,9 +551,9 @@ namespace DiskSpaceAnalyzer
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            g.Clear(Theme.BG);
+            g.Clear(BackColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            float w = 6 * Theme.Scale, inset = 4 * Theme.Scale + w / 2;
+            float w = Math.Max(2f, 6f * Width / 64f), inset = 4f * Width / 64f + w / 2;
             using (var pen = new Pen(Theme.ACCENT, w) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                 g.DrawArc(pen, inset, inset, Width - 2 * inset, Height - 2 * inset, angle, 120);
         }
@@ -561,6 +562,92 @@ namespace DiskSpaceAnalyzer
         {
             if (disposing) timer.Dispose();
             base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    /// Non-blocking scan progress strip under the toolbar: small spinner, status line (FG), detail line (muted),
+    /// a pill progress bar when the total is known, and Cancel. The rest of the window stays usable while it shows.
+    /// </summary>
+    internal sealed class ScanBar : Control
+    {
+        readonly Spinner spinner = new Spinner();
+        public readonly RoundButton CancelButton = new RoundButton("Cancel", ButtonKind.Secondary) { MinChars = 8 };
+        string status = "", detail = "";
+        double fraction = -1;
+
+        public ScanBar()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.BG;
+            spinner.BackColor = Theme.SURFACE;
+            Controls.Add(spinner);
+            Controls.Add(CancelButton);
+            Height = Theme.S(70);
+            Visible = false;
+        }
+
+        public void Start(string text)
+        {
+            status = text;
+            detail = "";
+            fraction = -1;
+            CancelButton.Enabled = true;
+            Visible = true;
+            spinner.Spinning = true;
+            Invalidate();
+        }
+
+        public void Stop()
+        {
+            spinner.Spinning = false;
+            Visible = false;
+        }
+
+        /// <summary>fraction 0..1, or negative when the total is unknown (no bar).</summary>
+        public void SetProgress(string text, string detailText, double frac)
+        {
+            if (text == status && detailText == detail && Math.Abs(frac - fraction) < 0.001) return;
+            status = text;
+            detail = detailText ?? "";
+            fraction = frac;
+            Invalidate();
+        }
+
+        Rectangle Box { get { return new Rectangle(0, 0, Width, Height - Theme.S(10)); } }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            var b = Box;
+            int sp = Theme.S(22);
+            spinner.Bounds = new Rectangle(b.X + Theme.S(14), b.Y + (b.Height - sp) / 2, sp, sp);
+            var cs = CancelButton.GetPreferredSize(Size.Empty);
+            CancelButton.Bounds = new Rectangle(b.Right - Theme.S(12) - cs.Width, b.Y + (b.Height - cs.Height) / 2, cs.Width, cs.Height);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            var b = Box;
+            Theme.FillRound(g, b, Theme.S(12), Theme.SURFACE, Theme.BORDER);
+            int x = spinner.Right + Theme.S(12), right = CancelButton.Left - Theme.S(16);
+            const TextFormatFlags f = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
+            int lineH = Font.Height, smallH = Theme.FONT_9.Height, barH = Theme.S(6);
+            int total = lineH + Theme.S(3) + smallH + (fraction >= 0 ? Theme.S(6) + barH : 0);
+            int y = b.Y + (b.Height - total) / 2;
+            TextRenderer.DrawText(g, status, Theme.FONT, new Rectangle(x, y, Math.Max(0, right - x), lineH), Theme.FG, f);
+            y += lineH + Theme.S(3);
+            TextRenderer.DrawText(g, detail, Theme.FONT_9, new Rectangle(x, y, Math.Max(0, right - x), smallH), Theme.MUTED, f);
+            if (fraction >= 0)
+            {
+                y += smallH + Theme.S(6);
+                var bar = new Rectangle(x, y, Math.Max(0, right - x), barH);
+                Theme.FillRound(g, bar, barH / 2, Theme.BORDER, Theme.BORDER);
+                int w = (int)Math.Round(bar.Width * Math.Min(1, fraction));
+                if (w > 0) Theme.FillRound(g, new Rectangle(bar.X, bar.Y, Math.Max(w, barH), barH), barH / 2, Theme.ACCENT, Theme.ACCENT);
+            }
         }
     }
 
@@ -695,7 +782,12 @@ namespace DiskSpaceAnalyzer
         /// <summary>Widest expected value per column; sets the column widths.</summary>
         public string[] ColumnSamples = new string[0];
         public bool[] ColumnMuted = new bool[0];
+        /// <summary>Column that also shows a percentage bar left of its text; BarValue returns 0-100, or a negative value for none.</summary>
+        public int BarColumn = -1;
+        public Func<TreeNode, double> BarValue;
         int lastWidth = -1;
+
+        int BarWidth { get { return Theme.S(44); } }
 
         const TextFormatFlags Flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
             TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
@@ -732,6 +824,7 @@ namespace DiskSpaceAnalyzer
             for (int i = ColumnSamples.Length - 1; i >= 0; i--)
             {
                 int w = TextRenderer.MeasureText(ColumnSamples[i], Font, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width;
+                if (i == BarColumn) w += BarWidth + Theme.S(8);
                 lefts[i] = right - w;
                 right = lefts[i] - ColumnGap;
             }
@@ -809,6 +902,19 @@ namespace DiskSpaceAnalyzer
                 {
                     var cr = new Rectangle(lefts[i], row.Y, ColumnRight(i) - lefts[i], row.Height);
                     bool muted = i < ColumnMuted.Length && ColumnMuted[i];
+                    if (i == BarColumn && BarValue != null)
+                    {
+                        double v = BarValue(n);
+                        if (v >= 0)
+                        {
+                            int bh = Theme.S(6);
+                            var bar = new Rectangle(cr.X, row.Y + (row.Height - bh) / 2, BarWidth, bh);
+                            Color track = strong ? Theme.BG : Theme.BORDER, fill = strong ? Theme.FG : Theme.ACCENT;
+                            Theme.FillRound(g, bar, bh / 2, track, track);
+                            int fw = (int)Math.Round(BarWidth * Math.Min(100, v) / 100);
+                            if (fw > 0) Theme.FillRound(g, new Rectangle(bar.X, bar.Y, Math.Max(fw, bh), bh), bh / 2, fill, fill);
+                        }
+                    }
                     TextRenderer.DrawText(g, values[i] ?? "", Font, cr, strong ? Theme.BG : muted ? Theme.MUTED : Theme.FG, Flags | TextFormatFlags.Right);
                 }
             }
