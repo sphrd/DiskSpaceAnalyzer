@@ -22,9 +22,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
 
 - Name: Disk Space Analyzer. Repo: `sphrd/DiskSpaceAnalyzer`. License: MIT.
 - AppUserModelID: `sphrd.DiskSpaceAnalyzer`.
-- Icon concept: **accent tile with a white pie chart missing a wedge on the right (Pac-Man style) = disk usage
-  analyzer that frees space.** The upper jaw is an `accent-light` slice split off by one `accent` gap line, so it
-  reads as a pie chart, not only Pac-Man. 3 elements, checked at 16 / 32 / 48 / 256 px.
+- Icon concept: **accent tile with a pie chart shaped like Pac-Man facing left = disk usage analyzer that frees space.**
+  One circle (same centre and radius) split only by colour: white right half, upper-left `accent-light` (#cfe4ff),
+  lower-left `#a6cfff` (icon-only shade between accent-light and accent-active, requested by the user), mouth on the left.
+  No gaps: the left sections run a few degrees under the white half so shared edges blend colour into colour. 3 elements, checked at 16 / 24 / 32 / 48 / 256 px.
 - Primary action: **Scan**. Destructive action: **Delete permanently** (warn kind, amber).
 - Domain status strings: `Scanning: <n> folders, <n> files, <size> so far` (no known total, so no `i/n`),
   `Cancelling... (finishing current folder)`, `Deleting: <n> files removed`, detail line = current path (muted).
@@ -42,6 +43,12 @@ patterns (Part 3) are applied through the WinForms mapping below.
   disk space. theres a bug in the app when hovering over the right side window the calculated sizes disappear.
   until i click which then they come back. also in the left side panel add always visible columns to show size and
   percentage on the right side of it, not attached to the names so this way they orm a column for a cleaner read."
+- 2026-10-27: "the icon has a cut, why? the pie chart is not cut smoothly. make it smooth. put a half circle (right side),
+  then on the left side add two smaller circle sections above and below each with a slightly different shade of blue,
+  in a way that looks like pacman, but flipped form current version."
+- 2026-10-27: "the circles radius ar enot matching! fix it. it should look like a smooth circle separate only by color.
+  remove the gap. wait with commit or releasing until i tell u. why did u put a screenshot of my pc analysis on the github????"
+- 2026-10-27: "i need a macos and macos arm (M series) version released as well. whats the effort for that? can we keep it this fast?"
 
 ## WinForms mapping of the design language
 
@@ -72,6 +79,14 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - The former toolbar **Stop** button became the overlay's **Cancel** (same action; Stop was only usable while scanning).
 
 ## Decisions and gotchas
+
+- **Privacy: screenshots for the repo never show a real scan of the user's machine** (v1.0-v1.2 showed the user's
+  C:\Program Files). Build a demo tree of sparse files under a neutral path (e.g. `C:\Demo`: `fsutil sparse setflag`,
+  then `SetLength`; no disk space used), capture with `PrintWindow`, blank the drive free-space label, delete the
+  demo tree afterwards. Never commit machine-specific details (paths, user names, security policies).
+
+- Icon: do not cut pie slices with thick strokes in the tile colour. v1.2.0 did, and the square line end left a
+  ragged notch on the rim. Separate slices by offsetting whole `FillPie` shapes instead.
 
 - **Owner-drawn ListView, details view:** when the cursor moves over a row, the native list repaints it by raising
   `DrawItem` *without* `DrawSubItem`. Painting cells in `OnDrawSubItem` (and the row background in `OnDrawItem`)

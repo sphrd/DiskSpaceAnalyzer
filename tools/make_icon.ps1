@@ -1,11 +1,12 @@
 # Generates assets\app.ico (16-256 px, PNG-compressed) and assets\app.png (256 px) following the
-# design language: ACCENT rounded tile (radius 22 %) with an FG pie chart missing a wedge on the right (Pac-Man style:
-# disk usage, space being freed) and one ACCENT_LIGHT slice split off by ACCENT gaps. Drawn at 4x and downscaled.
+# design language: ACCENT rounded tile (radius 22 %) with a pie chart shaped like Pac-Man facing left: FG half disc on the
+# right, two smaller sections on the left (ACCENT_LIGHT above, ACCENT_MID below). Drawn at 4x and downscaled.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
 $ACCENT = [System.Drawing.ColorTranslator]::FromHtml('#4da3ff')
 $ACCENT_LIGHT = [System.Drawing.ColorTranslator]::FromHtml('#cfe4ff')
+$ACCENT_MID = [System.Drawing.ColorTranslator]::FromHtml('#a6cfff')   # icon-only shade between accent-light and accent-active (user request)
 $FG = [System.Drawing.ColorTranslator]::FromHtml('#ffffff')
 $BG = [System.Drawing.ColorTranslator]::FromHtml('#222831')
 
@@ -27,18 +28,19 @@ function New-IconBitmap([int]$size) {
     $g.Clear([System.Drawing.Color]::Transparent)
     $g.FillPath((New-Object System.Drawing.SolidBrush $ACCENT), (New-RoundPath 0 0 $n $n (0.22 * $n)))
 
-    # Pie chart with a wedge missing on the right (Pac-Man style): disk usage with space being freed.
-    $r = 0.31 * $n; $cx = 0.47 * $n; $cy = 0.5 * $n
-    $mouth = 36                                   # half-angle of the missing wedge, degrees
-    $g.FillPie((New-Object System.Drawing.SolidBrush $FG), $cx - $r, $cy - $r, 2 * $r, 2 * $r, $mouth, 360 - 2 * $mouth)
-    $s0 = 250; $s1 = 360 - $mouth                 # accent-light slice: the upper jaw, next to the gap
-    $g.FillPie((New-Object System.Drawing.SolidBrush $ACCENT_LIGHT), $cx - $r, $cy - $r, 2 * $r, 2 * $r, $s0, $s1 - $s0)
-    $pen = New-Object System.Drawing.Pen $ACCENT, (0.05 * $n)
-    $pen.StartCap = 'Round'; $pen.EndCap = 'Flat'
-    foreach ($deg in @($s0)) {
-        $t = $deg * [Math]::PI / 180
-        $g.DrawLine($pen, $cx, $cy, $cx + ($r + 0.02 * $n) * [Math]::Cos($t), $cy + ($r + 0.02 * $n) * [Math]::Sin($t))
-    }    $g.Dispose()
+    # Pie chart, Pac-Man facing left: one circle (single centre and radius) split only by colour into an FG
+    # right half, an ACCENT_LIGHT upper-left section and an ACCENT_MID lower-left section, with the mouth on the left.
+    # The left sections are drawn first and run a few degrees under the half disc, so the shared edges blend
+    # colour into colour (no seam of tile colour between the slices).
+    $cx = 0.5 * $n; $cy = 0.5 * $n
+    $R = 0.32 * $n
+    $mouth = 30                                   # half-angle of the mouth, degrees
+    $under = 6                                    # degrees each section runs underneath the half disc
+    $box = @(($cx - $R), ($cy - $R), (2 * $R), (2 * $R))
+    $g.FillPie((New-Object System.Drawing.SolidBrush $ACCENT_LIGHT), $box[0], $box[1], $box[2], $box[3], 180 + $mouth, 90 - $mouth + $under)
+    $g.FillPie((New-Object System.Drawing.SolidBrush $ACCENT_MID), $box[0], $box[1], $box[2], $box[3], 90 - $under, 90 - $mouth + $under)
+    $g.FillPie((New-Object System.Drawing.SolidBrush $FG), $box[0], $box[1], $box[2], $box[3], -90, 180)
+    $g.Dispose()
 
     $bmp = New-Object System.Drawing.Bitmap $size, $size
     $g = [System.Drawing.Graphics]::FromImage($bmp)
