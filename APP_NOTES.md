@@ -100,3 +100,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - v1.0.0 (2026-10-27): first release, light WinForms UI, ~66 KB.
 - v1.1.0 (2026-10-27): design-language dark theme restyle, ~96 KB. Verified: Program Files scan
   matches pre-restyle counts; cancel, rescan and permanent delete on a sandbox folder work on the real exe.
+- v1.2.0 (2026-10-27): pie-chart icon, hover fix in the lists, aligned Size / % of parent columns in the tree,
+  `--cli scan` headless mode, build moves the exe to the root. ~100 KB.
