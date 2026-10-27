@@ -11,3 +11,6 @@ assets/app.ico
 *.user
 Thumbs.db
 desktop.ini
+
+# Scratch planning log
+plan.txt
