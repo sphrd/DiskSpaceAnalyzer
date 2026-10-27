@@ -65,12 +65,13 @@ cd DiskSpaceAnalyzer
 .\build.ps1
 ```
 
-The executable is written to `bin\DiskSpaceAnalyzer.exe`.
+The executable is built to `bin\DiskSpaceAnalyzer.exe` and copied to the
+repository root as `DiskSpaceAnalyzer.exe` (close a running copy first).
 
 ### Headless scan (for scripting / verification)
 
 ```powershell
-bin\DiskSpaceAnalyzer.exe --scan "C:\Program Files"
+DiskSpaceAnalyzer.exe --scan "C:\Program Files"
 ```
 
 Prints the total size, file/folder counts, scan time, and top-level breakdown.

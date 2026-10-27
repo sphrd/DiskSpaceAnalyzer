@@ -1,5 +1,5 @@
-# Builds bin\DiskSpaceAnalyzer.exe with the C# compiler that ships with Windows (.NET Framework 4.x).
-# No SDK, NuGet or Visual Studio needed.
+# Builds DiskSpaceAnalyzer.exe from src\ with the C# compiler that ships with Windows (.NET Framework 4.x),
+# then copies it to the repository root. No SDK, NuGet or Visual Studio needed.
 param([string]$Out = "$PSScriptRoot\bin\DiskSpaceAnalyzer.exe")
 $ErrorActionPreference = 'Stop'
 
@@ -19,4 +19,9 @@ $sources = Get-ChildItem "$PSScriptRoot\src\*.cs" | ForEach-Object { $_.FullName
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     $sources
 if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)" }
-Get-Item $Out | Select-Object FullName, Length
+
+$rootExe = Join-Path $PSScriptRoot (Split-Path $Out -Leaf)
+try { Copy-Item $Out $rootExe -Force }
+catch { throw "Could not copy to $rootExe (close the running app and build again): $($_.Exception.Message)" }
+
+Get-Item $Out, $rootExe | Select-Object FullName, Length, LastWriteTime

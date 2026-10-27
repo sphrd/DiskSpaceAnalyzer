@@ -16,7 +16,7 @@ Part 3's PyInstaller/venv/splash sections do not apply.
 | List view (rows, bars, header) + sorting | `src/Controls.cs` |
 | Scanner / deleter / interop (domain, not UI) | `src/Scanner.cs`, `src/Deleter.cs`, `src/Native.cs` |
 | Asset generator (icon `.ico` + 256 px `.png`) | `tools/make_icon.ps1` (run by every build) |
-| Build script | `build.ps1` -> `bin/DiskSpaceAnalyzer.exe` |
+| Build script | `build.ps1` -> `bin/DiskSpaceAnalyzer.exe`, copied to the repo root (`DiskSpaceAnalyzer.exe`, git-ignored) |
 | Version | `src/Program.cs` (`AssemblyVersion` / `AssemblyFileVersion`) |
 
 ## App identity
@@ -71,7 +71,7 @@ Part 3's PyInstaller/venv/splash sections do not apply.
   `WM_LBUTTONDOWN/UP` to a button, `WM_COMMAND IDYES` to the confirm dialog).
 - Driving `MainForm` in-process from PowerShell is fine for synchronous checks, but `await` continuations stall
   there (no WinForms message loop); test async flows (scan/cancel/rescan/delete) on the real exe.
-- Headless check: `Start-Process bin\DiskSpaceAnalyzer.exe -ArgumentList '--scan','"<dir>"' -Wait -NoNewWindow
+- Headless check: `Start-Process DiskSpaceAnalyzer.exe -ArgumentList '--scan','"<dir>"' -Wait -NoNewWindow
   -RedirectStandardOutput <file>`; a plain call does not capture a winexe's stdout.
 
 ## Releases
