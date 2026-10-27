@@ -1,6 +1,6 @@
 # Generates assets\app.ico (16-256 px, PNG-compressed) and assets\app.png (256 px) following the
-# design language: ACCENT rounded tile (radius 22 %), FG document with a folded corner (ACCENT_LIGHT),
-# three BG content lines ending in ACCENT dots with a BG ring. Drawn at 4x and downscaled.
+# design language: ACCENT rounded tile (radius 22 %) with an FG pie chart missing a wedge on the right (Pac-Man style:
+# disk usage, space being freed) and one ACCENT_LIGHT slice split off by ACCENT gaps. Drawn at 4x and downscaled.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
@@ -27,27 +27,18 @@ function New-IconBitmap([int]$size) {
     $g.Clear([System.Drawing.Color]::Transparent)
     $g.FillPath((New-Object System.Drawing.SolidBrush $ACCENT), (New-RoundPath 0 0 $n $n (0.22 * $n)))
 
-    $x0 = 0.26 * $n; $x1 = 0.74 * $n; $y0 = 0.17 * $n; $y1 = 0.83 * $n; $fold = 0.14 * $n
-    $doc = [System.Drawing.PointF[]]@(
-        (New-Object System.Drawing.PointF $x0, $y0), (New-Object System.Drawing.PointF ($x1 - $fold), $y0),
-        (New-Object System.Drawing.PointF $x1, ($y0 + $fold)), (New-Object System.Drawing.PointF $x1, $y1),
-        (New-Object System.Drawing.PointF $x0, $y1))
-    $g.FillPolygon((New-Object System.Drawing.SolidBrush $FG), $doc)
-    $tri = [System.Drawing.PointF[]]@(
-        (New-Object System.Drawing.PointF ($x1 - $fold), $y0), (New-Object System.Drawing.PointF ($x1 - $fold), ($y0 + $fold)),
-        (New-Object System.Drawing.PointF $x1, ($y0 + $fold)))
-    $g.FillPolygon((New-Object System.Drawing.SolidBrush $ACCENT_LIGHT), $tri)
-
-    $thick = 0.045 * $n; $dot = 0.035 * $n; $ring = 0.012 * $n
-    $pen = New-Object System.Drawing.Pen $BG, $thick
-    $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
-    foreach ($row in @(@(0.42, 0.58), @(0.55, 0.62), @(0.68, 0.58))) {
-        $y = $row[0] * $n; $xe = $row[1] * $n
-        $g.DrawLine($pen, 0.34 * $n, $y, $xe, $y)
-        $g.FillEllipse((New-Object System.Drawing.SolidBrush $BG), $xe - $dot - $ring, $y - $dot - $ring, 2 * ($dot + $ring), 2 * ($dot + $ring))
-        $g.FillEllipse((New-Object System.Drawing.SolidBrush $ACCENT), $xe - $dot, $y - $dot, 2 * $dot, 2 * $dot)
-    }
-    $g.Dispose()
+    # Pie chart with a wedge missing on the right (Pac-Man style): disk usage with space being freed.
+    $r = 0.31 * $n; $cx = 0.47 * $n; $cy = 0.5 * $n
+    $mouth = 36                                   # half-angle of the missing wedge, degrees
+    $g.FillPie((New-Object System.Drawing.SolidBrush $FG), $cx - $r, $cy - $r, 2 * $r, 2 * $r, $mouth, 360 - 2 * $mouth)
+    $s0 = 250; $s1 = 360 - $mouth                 # accent-light slice: the upper jaw, next to the gap
+    $g.FillPie((New-Object System.Drawing.SolidBrush $ACCENT_LIGHT), $cx - $r, $cy - $r, 2 * $r, 2 * $r, $s0, $s1 - $s0)
+    $pen = New-Object System.Drawing.Pen $ACCENT, (0.05 * $n)
+    $pen.StartCap = 'Round'; $pen.EndCap = 'Flat'
+    foreach ($deg in @($s0)) {
+        $t = $deg * [Math]::PI / 180
+        $g.DrawLine($pen, $cx, $cy, $cx + ($r + 0.02 * $n) * [Math]::Cos($t), $cy + ($r + 0.02 * $n) * [Math]::Sin($t))
+    }    $g.Dispose()
 
     $bmp = New-Object System.Drawing.Bitmap $size, $size
     $g = [System.Drawing.Graphics]::FromImage($bmp)

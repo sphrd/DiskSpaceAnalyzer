@@ -23,7 +23,7 @@ jobs:
         shell: pwsh
         run: |
           $log = New-TemporaryFile
-          Start-Process bin\DiskSpaceAnalyzer.exe -ArgumentList '--scan',"`"$env:WINDIR\System32\drivers`"" -Wait -NoNewWindow -RedirectStandardOutput $log.FullName
+          Start-Process .\DiskSpaceAnalyzer.exe -ArgumentList '--cli','scan',"`"$env:WINDIR\System32\drivers`"" -Wait -NoNewWindow -RedirectStandardOutput $log.FullName
           $out = Get-Content $log.FullName
           $out
           if (-not ($out -match 'bytes')) { throw 'self-check produced no result' }
@@ -32,10 +32,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DiskSpaceAnalyzer
-          path: bin/DiskSpaceAnalyzer.exe
+          path: DiskSpaceAnalyzer.exe
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: bin/DiskSpaceAnalyzer.exe
+          files: DiskSpaceAnalyzer.exe

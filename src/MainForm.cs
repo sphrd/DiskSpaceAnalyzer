@@ -120,8 +120,14 @@ namespace DiskSpaceAnalyzer
             tree.AfterSelect += (s, e) => { var d = e.Node.Tag as DirNode; if (d != null) ShowContents(d); };
             tree.NodeMouseClick += (s, e) => { if (e.Button == MouseButtons.Right) tree.SelectedNode = e.Node; };
             tree.Enter += (s, e) => lastView = tree;
+            // Samples are the widest expected value or the header title, whichever is wider.
+            tree.ColumnSamples = new[] { "999.9 MB", "% of parent" };
+            tree.ColumnMuted = new[] { false, true };
+            tree.ColumnText = TreeColumns;
             var treePanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill, TrackFocus = true };
             treePanel.Controls.Add(new ScrollHost(tree) { Dock = DockStyle.Fill });
+            treePanel.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(4), BackColor = Theme.SURFACE });
+            treePanel.Controls.Add(new TreeHeader(tree, "Name", "Size", "% of parent") { Dock = DockStyle.Top });
 
             // Folder contents
             contents = new SizeListView { ContextMenuStrip = menu };
@@ -431,10 +437,15 @@ namespace DiskSpaceAnalyzer
 
         static string TreeText(DirNode d)
         {
-            string text = d.Name + "   " + Fmt.Size(d.Size);
-            if (d.Parent != null && d.Parent.Size > 0) text += string.Format("   {0:0.0}%", 100.0 * d.Size / d.Parent.Size);
-            if (d.Denied) text += "   [access denied]";
-            return text;
+            return d.Denied ? d.Name + "  [access denied]" : d.Name;
+        }
+
+        static string[] TreeColumns(TreeNode tn)
+        {
+            var d = tn.Tag as DirNode;
+            if (d == null) return null;
+            string pct = d.Parent != null && d.Parent.Size > 0 ? string.Format("{0:0.0} %", 100.0 * d.Size / d.Parent.Size) : "";
+            return new[] { Fmt.Size(d.Size), pct };
         }
 
         static TreeNode MakeTreeNode(DirNode d)

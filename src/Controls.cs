@@ -195,29 +195,46 @@ namespace DiskSpaceAnalyzer
             TextRenderer.DrawText(g, e.Header.Text, Font, tr, e.ColumnIndex == sortColumn ? Theme.ACCENT : Theme.MUTED, flags);
         }
 
+        // The whole row is painted here. On hover the native list repaints a row by raising DrawItem
+        // without DrawSubItem, so painting cells in OnDrawSubItem made them vanish until the next click.
         protected override void OnDrawItem(DrawListViewItemEventArgs e)
         {
             var g = e.Graphics;
-            var r = e.Bounds;
-            using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, r);
-            if (!e.Item.Selected) return;
-            Color fill = Focused ? Theme.ACCENT : Theme.BORDER;
-            Theme.FillRound(g, new Rectangle(r.X + Theme.S(2), r.Y + 1, r.Width - Theme.S(4), r.Height - 2), Theme.S(6), fill, fill);
+            var row = e.Bounds;
+            using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, row);
+            bool strong = e.Item.Selected && Focused;
+            if (e.Item.Selected)
+            {
+                Color fill = strong ? Theme.ACCENT : Theme.BORDER;
+                Theme.FillRound(g, new Rectangle(row.X + Theme.S(2), row.Y + 1, row.Width - Theme.S(4), row.Height - 2), Theme.S(6), fill, fill);
+            }
+
+            var order = new ColumnHeader[Columns.Count];
+            foreach (ColumnHeader c in Columns) order[c.DisplayIndex] = c;
+            int x = row.X;
+            foreach (var c in order)
+            {
+                var cell = new Rectangle(x, row.Y, c.Width, row.Height);
+                x += c.Width;
+                if (cell.Right <= e.Bounds.Left || cell.Width <= 0) continue;
+                string text = c.Index < e.Item.SubItems.Count ? e.Item.SubItems[c.Index].Text : "";
+                var clip = g.Clip;
+                g.SetClip(cell, System.Drawing.Drawing2D.CombineMode.Intersect);
+                DrawCell(g, e.Item, c, cell, text, strong);
+                g.Clip = clip;
+            }
         }
 
-        protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
+        protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e) { }
+
+        void DrawCell(Graphics g, ListViewItem item, ColumnHeader col, Rectangle r, string text, bool strong)
         {
-            var info = e.Item.Tag as ItemInfo;
-            var g = e.Graphics;
-            var r = e.Bounds;
-            bool strong = e.Item.Selected && Focused;
-            Color fore = strong ? Theme.BG : e.Item.ForeColor;
+            var info = item.Tag as ItemInfo;
+            Color fore = strong ? Theme.BG : item.ForeColor;
             int pad = Theme.S(6);
 
-            if (e.ColumnIndex == 0)
+            if (col.Index == 0)
             {
-                // Sub-item 0 spans the whole row; clip it to the first column.
-                r = new Rectangle(r.X, r.Y, Columns[0].Width, r.Height);
                 int icon = Theme.S(16);
                 if (info != null && !info.IsSummary)
                 {
@@ -226,11 +243,11 @@ namespace DiskSpaceAnalyzer
                     if (info.IsDir) Theme.DrawFolder(g, ir, ic); else Theme.DrawFile(g, ir, ic);
                 }
                 var tr = new Rectangle(r.X + pad + icon + Theme.S(6), r.Y, Math.Max(0, r.Width - pad - icon - Theme.S(12)), r.Height);
-                TextRenderer.DrawText(g, e.SubItem.Text, Font, tr, fore, CellFlags);
+                TextRenderer.DrawText(g, text, Font, tr, fore, CellFlags);
                 return;
             }
 
-            if (e.ColumnIndex == BarColumn)
+            if (col.Index == BarColumn)
             {
                 double pct = info != null ? info.Percent : 0;
                 int textW = TextRenderer.MeasureText("100.0 %", Font).Width;
@@ -244,13 +261,13 @@ namespace DiskSpaceAnalyzer
                     int w = (int)Math.Round(bar.Width * Math.Min(100, Math.Max(0, pct)) / 100);
                     if (w > 0) Theme.FillRound(g, new Rectangle(bar.X, bar.Y, Math.Max(w, bh), bh), bh / 2, fill, fill);
                 }
-                TextRenderer.DrawText(g, e.SubItem.Text, Font, new Rectangle(r.Right - textW - pad, r.Y, textW, r.Height), fore,
+                TextRenderer.DrawText(g, text, Font, new Rectangle(r.Right - textW - pad, r.Y, textW, r.Height), fore,
                     CellFlags | TextFormatFlags.Right);
                 return;
             }
 
-            var flags = CellFlags | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left);
-            TextRenderer.DrawText(g, e.SubItem.Text, Font, new Rectangle(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height), fore, flags);
+            var flags = CellFlags | (col.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left);
+            TextRenderer.DrawText(g, text, Font, new Rectangle(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height), fore, flags);
         }
 
         /// <summary>Paints the header area to the right of the last column, which owner-draw does not cover.</summary>

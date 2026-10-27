@@ -681,10 +681,24 @@ namespace DiskSpaceAnalyzer
         }
     }
 
-    /// <summary>Folder tree drawn entirely in the palette: chevrons, folder glyphs, name in FG, size in MUTED.</summary>
+    /// <summary>
+    /// Folder tree drawn in the palette: chevrons, folder glyphs and the name on the left, plus right-aligned
+    /// value columns (size, percentage) that line up on every row. No horizontal scrolling: long names are ellipsized.
+    /// </summary>
     internal sealed class DarkTreeView : TreeView, IScrollNotify
     {
         public event EventHandler ScrollChanged;
+        public event EventHandler ColumnsMoved;
+
+        /// <summary>Text for the value columns of a node (same order as ColumnSamples); null = none.</summary>
+        public Func<TreeNode, string[]> ColumnText;
+        /// <summary>Widest expected value per column; sets the column widths.</summary>
+        public string[] ColumnSamples = new string[0];
+        public bool[] ColumnMuted = new bool[0];
+        int lastWidth = -1;
+
+        const TextFormatFlags Flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter |
+            TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
 
         public DarkTreeView()
         {
@@ -696,6 +710,38 @@ namespace DiskSpaceAnalyzer
             ShowLines = false;
             FullRowSelect = true;
             HideSelection = false;
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style |= 0x8000; // TVS_NOHSCROLL
+                return cp;
+            }
+        }
+
+        public int ColumnGap { get { return Theme.S(14); } }
+
+        /// <summary>Left x of each value column, in tree client coordinates (rightmost column ends 8 px from the edge).</summary>
+        public int[] ColumnLefts()
+        {
+            var lefts = new int[ColumnSamples.Length];
+            int right = ClientSize.Width - Theme.S(8);
+            for (int i = ColumnSamples.Length - 1; i >= 0; i--)
+            {
+                int w = TextRenderer.MeasureText(ColumnSamples[i], Font, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width;
+                lefts[i] = right - w;
+                right = lefts[i] - ColumnGap;
+            }
+            return lefts;
+        }
+
+        public int ColumnRight(int i)
+        {
+            var lefts = ColumnLefts();
+            return i + 1 < lefts.Length ? lefts[i + 1] - ColumnGap : ClientSize.Width - Theme.S(8);
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -711,6 +757,14 @@ namespace DiskSpaceAnalyzer
             {
                 case 0x0F: case 0x114: case 0x115: case 0x20A: case 0x20E: case 0x05:
                     if (ScrollChanged != null) ScrollChanged(this, EventArgs.Empty);
+                    if (ClientSize.Width != lastWidth)
+                    {
+                        // Columns hang off the right edge: repaint all rows (and the header) when the width changes,
+                        // e.g. when the vertical scrollbar appears or the splitter moves.
+                        lastWidth = ClientSize.Width;
+                        Invalidate();
+                        if (ColumnsMoved != null) ColumnsMoved(this, EventArgs.Empty);
+                    }
                     break;
             }
         }
@@ -743,18 +797,64 @@ namespace DiskSpaceAnalyzer
                 var cr = new Rectangle(iconRect.X - Indent / 2 - cs / 2 - Theme.S(2), row.Y + (row.Height - cs) / 2, cs, cs);
                 Theme.DrawChevron(g, cr, strong ? Theme.BG : n.IsExpanded ? Theme.ACCENT : Theme.MUTED, n.IsExpanded);
             }
-            bool dim = n.ForeColor == Theme.MUTED;
             Theme.DrawFolder(g, iconRect, strong ? Theme.BG : Theme.MUTED);
 
-            string name = string.IsNullOrEmpty(n.Name) ? n.Text : n.Name;
-            string rest = n.Text.Length > name.Length && n.Text.StartsWith(name) ? n.Text.Substring(name.Length) : "";
+            var values = ColumnText != null ? ColumnText(n) : null;
+            int nameRight = row.Right - Theme.S(8);
+            if (values != null && ColumnSamples.Length > 0)
+            {
+                var lefts = ColumnLefts();
+                nameRight = lefts[0] - ColumnGap;
+                for (int i = 0; i < lefts.Length && i < values.Length; i++)
+                {
+                    var cr = new Rectangle(lefts[i], row.Y, ColumnRight(i) - lefts[i], row.Height);
+                    bool muted = i < ColumnMuted.Length && ColumnMuted[i];
+                    TextRenderer.DrawText(g, values[i] ?? "", Font, cr, strong ? Theme.BG : muted ? Theme.MUTED : Theme.FG, Flags | TextFormatFlags.Right);
+                }
+            }
+            bool dim = n.ForeColor == Theme.MUTED;
+            var tr = new Rectangle(textX, row.Y, Math.Max(0, nameRight - textX), row.Height);
+            TextRenderer.DrawText(g, n.Text, Font, tr, strong ? Theme.BG : dim ? Theme.MUTED : Theme.FG, Flags);
+        }
+    }
+
+    /// <summary>Header row for a DarkTreeView: "Name" on the left and the value column titles aligned over their columns.</summary>
+    internal sealed class TreeHeader : Control
+    {
+        readonly DarkTreeView tree;
+        readonly string name;
+        readonly string[] titles;
+
+        public TreeHeader(DarkTreeView tree, string name, params string[] titles)
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            SetStyle(ControlStyles.Selectable, false);
+            this.tree = tree;
+            this.name = name;
+            this.titles = titles;
+            Font = Theme.FONT;
+            BackColor = Theme.SURFACE;
+            Height = Font.Height + Theme.S(12);
+            tree.ColumnsMoved += (s, e) => Invalidate();
+            tree.Resize += (s, e) => Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
             const TextFormatFlags f = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
-            int nameW = TextRenderer.MeasureText(g, name, Font, Size.Empty, f).Width;
-            var tr = new Rectangle(textX, row.Y, Math.Max(nameW, row.Right - textX), row.Height);
-            TextRenderer.DrawText(g, name, Font, tr, strong ? Theme.BG : dim ? Theme.MUTED : Theme.FG, f);
-            if (rest.Length > 0)
-                TextRenderer.DrawText(g, rest, Font, new Rectangle(textX + nameW, row.Y, Math.Max(0, row.Right - textX - nameW), row.Height),
-                    strong ? Theme.BG : Theme.MUTED, f);
+            TextRenderer.DrawText(g, name, Font, new Rectangle(Theme.S(8), 0, Width, Height - 1), Theme.MUTED, f);
+            if (tree.IsHandleCreated)
+            {
+                var lefts = tree.ColumnLefts();
+                for (int i = 0; i < lefts.Length && i < titles.Length; i++)
+                {
+                    int right = tree.ColumnRight(i);
+                    TextRenderer.DrawText(g, titles[i], Font, new Rectangle(right - Theme.S(200), 0, Theme.S(200), Height - 1), Theme.MUTED, f | TextFormatFlags.Right);
+                }
+            }
+            using (var p = new Pen(Theme.BORDER)) g.DrawLine(p, 0, Height - 1, Width, Height - 1);
         }
     }
 }

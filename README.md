@@ -18,8 +18,9 @@ single-file GUI.
 
 - **Fast parallel scan** using the Win32 `FindFirstFileEx` API (basic info +
   large fetch) across multiple worker threads, aggregating sizes bottom-up.
-- **Size tree** of folders and subfolders with size, percentage of parent, and
-  file/folder counts — sortable by any column.
+- **Size tree** of folders and subfolders with aligned **Size** and
+  **% of parent** columns; the contents list adds file/folder counts and is
+  sortable by any column.
 - **Folder contents** pane with owner-drawn percentage bars, plus a
   **Largest files (top 1000)** tab to find big files anywhere in the tree.
 - **Permanent delete** (bypasses the Recycle Bin) of files and folders, with a
@@ -65,16 +66,19 @@ cd DiskSpaceAnalyzer
 .\build.ps1
 ```
 
-The executable is built to `bin\DiskSpaceAnalyzer.exe` and copied to the
-repository root as `DiskSpaceAnalyzer.exe` (close a running copy first).
+The build moves `DiskSpaceAnalyzer.exe` to the repository root and removes the
+intermediate `bin\` folder (close a running copy first).
 
 ### Headless scan (for scripting / verification)
 
 ```powershell
-DiskSpaceAnalyzer.exe --scan "C:\Program Files"
+DiskSpaceAnalyzer.exe --cli scan "C:\Program Files"
 ```
 
 Prints the total size, file/folder counts, scan time, and top-level breakdown.
+(`--scan <folder>` still works as a shorthand.) Run it with output redirected,
+e.g. `Start-Process ... -Wait -NoNewWindow -RedirectStandardOutput out.txt`, or
+from a console. Crashes are written to `DiskSpaceAnalyzer_error.txt`.
 
 ## How it works
 
