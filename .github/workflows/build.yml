@@ -20,7 +20,9 @@ jobs:
       - name: Headless self-check
         shell: pwsh
         run: |
-          $out = & bin\DiskSpaceAnalyzer.exe --scan "$env:WINDIR\System32\drivers"
+          $log = New-TemporaryFile
+          Start-Process bin\DiskSpaceAnalyzer.exe -ArgumentList '--scan',"`"$env:WINDIR\System32\drivers`"" -Wait -NoNewWindow -RedirectStandardOutput $log.FullName
+          $out = Get-Content $log.FullName
           $out
           if (-not ($out -match 'bytes')) { throw 'self-check produced no result' }
 

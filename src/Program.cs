@@ -28,7 +28,10 @@ namespace DiskSpaceAnalyzer
 
         static int ConsoleScan(string path)
         {
-            AttachConsole(-1);
+            // When stdout is already redirected (piped/captured), write straight to it;
+            // only attach to the parent console for interactive use.
+            IntPtr stdout = GetStdHandle(-11);
+            if (stdout == IntPtr.Zero || stdout == new IntPtr(-1)) AttachConsole(-1);
             var sw = Stopwatch.StartNew();
             var root = new Scanner(10).Run(System.IO.Path.GetFullPath(path));
             sw.Stop();
@@ -42,5 +45,8 @@ namespace DiskSpaceAnalyzer
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         static extern bool AttachConsole(int processId);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        static extern IntPtr GetStdHandle(int which);
     }
 }
