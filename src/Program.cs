@@ -22,7 +22,12 @@ namespace DiskSpaceAnalyzer
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm(args.Length > 0 ? args[0] : null));
+            try { Application.Run(new MainForm(args.Length > 0 ? args[0] : null)); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "Disk Space Analyzer - startup error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 1;
+            }
             return 0;
         }
 

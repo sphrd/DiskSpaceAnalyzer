@@ -27,10 +27,13 @@ single-file GUI.
 - **Correct and safe:** follows nothing through junctions/symlinks (their targets
   are never scanned or deleted), supports paths longer than 260 characters, and
   clears read-only attributes so deletes don't get stuck.
-- **Live progress**, a **Stop** button for partial results, **Rescan folder**,
-  **Show in Explorer**, **Copy path**, drag-and-drop a folder onto the window,
-  and an optional **Run as administrator** relaunch for protected folders.
-- **No installer, no runtime download.** A single ~65 KB `.exe` that runs on the
+- **Live progress** on a busy overlay with **Cancel** for partial results,
+  **Rescan folder**, **Show in Explorer**, **Copy path**, drag-and-drop a folder
+  onto the window, and an optional **Run as administrator** relaunch for
+  protected folders.
+- **Dark, flat, rounded UI**: one blue accent, amber only for the destructive
+  action, thin pill scrollbars, dark title bar and menus.
+- **No installer, no runtime download.** A single ~100 KB `.exe` that runs on the
   .NET Framework 4.x built into every Windows 10/11 machine.
 
 ## Download
@@ -85,6 +88,11 @@ Prints the total size, file/folder counts, scan time, and top-level breakdown.
 - **Deleter** (`src/Deleter.cs`): custom recursive delete via `DeleteFileW` /
   `RemoveDirectoryW` so it isn't limited by `MAX_PATH` and removes reparse points
   as links rather than descending into them.
+- **UI** (`src/Theme.cs`, `src/Widgets.cs`, `src/Controls.cs`): palette and
+  fonts in one place; owner-drawn rounded buttons, panels, tabs, tree and list;
+  the native list/tree scrollbars are clipped away and replaced by pill
+  scrollbars that mirror and drive the native scroll position. Design notes are
+  in [APP_NOTES.md](APP_NOTES.md).
 
 ## License
 

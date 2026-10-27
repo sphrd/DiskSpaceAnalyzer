@@ -7,8 +7,9 @@ $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
 if (-not (Test-Path $csc)) { throw '.NET Framework 4.x C# compiler (csc.exe) not found.' }
 
+# Artwork is regenerated on every build so it always matches the design language.
+& "$PSScriptRoot\tools\make_icon.ps1" | Out-Null
 $icon = "$PSScriptRoot\assets\app.ico"
-if (-not (Test-Path $icon)) { & "$PSScriptRoot\tools\make_icon.ps1" }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $Out) | Out-Null
 $sources = Get-ChildItem "$PSScriptRoot\src\*.cs" | ForEach-Object { $_.FullName }

@@ -18,7 +18,6 @@ namespace DiskSpaceAnalyzer
         const int TopCount = 1000;
         const int MaxFilesShown = 2000;
 
-        readonly float scale;
         readonly bool isAdmin;
 
         DirNode root, current;
@@ -28,83 +27,77 @@ namespace DiskSpaceAnalyzer
         bool busy;
         Control lastView;
 
-        readonly ToolStripComboBox pathBox;
-        readonly ToolStripButton btnBrowse, btnScan, btnStop, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
+        readonly PathInput pathBox;
+        readonly Label pathLabel;
+        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
+        readonly Panel toolbar;
         readonly SplitContainer split;
-        readonly TreeView tree;
-        readonly TabControl tabs;
+        readonly DarkTreeView tree;
+        readonly TabStrip tabs;
+        readonly ScrollHost contentsHost, largestHost;
         readonly SizeListView contents, largest;
-        readonly ToolStripStatusLabel statusLabel, driveLabel;
-        readonly ToolStripProgressBar progress;
+        readonly Label statusLabel, driveLabel;
+        readonly BusyOverlay overlay;
         readonly System.Windows.Forms.Timer uiTimer;
         readonly ContextMenuStrip menu;
+        readonly ToolTip tips = new ToolTip();
         ToolStripMenuItem miOpen, miExplorer, miCopy, miRescan, miDelete;
 
         public MainForm(string initialPath)
         {
-            using (var g = CreateGraphics()) scale = g.DpiX / 96f;
+            using (var g = CreateGraphics()) Theme.Scale = g.DpiX / 96f;
             isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
 
             Text = AppName + (isAdmin ? " (Administrator)" : "");
-            Font = new Font("Segoe UI", 9f);
+            Font = Theme.FONT;
+            BackColor = Theme.BG;
+            ForeColor = Theme.FG;
             AutoScaleMode = AutoScaleMode.None;
             Size = new Size(S(1240), S(780));
-            MinimumSize = new Size(S(700), S(420));
+            MinimumSize = new Size(S(760), S(460));
             StartPosition = FormStartPosition.CenterScreen;
             KeyPreview = true;
             AllowDrop = true;
+            Padding = new Padding(S(15), S(10), S(15), 0);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
-            var icons = new ImageList { ColorDepth = ColorDepth.Depth32Bit, ImageSize = new Size(S(16), S(16)) };
-            var folderIcon = Native.StockIcon(true);
-            var fileIcon = Native.StockIcon(false);
-            if (folderIcon != null) icons.Images.Add("folder", folderIcon);
-            if (fileIcon != null) icons.Images.Add("file", fileIcon);
-
-            // Toolbar
-            var tool = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(S(6), S(4), S(6), S(4)), ImageScalingSize = new Size(S(16), S(16)) };
-            pathBox = new ToolStripComboBox { AutoSize = false, Width = S(340), DropDownStyle = ComboBoxStyle.DropDown, ToolTipText = "Drive or folder to analyze (you can also drag a folder onto the window)" };
+            // Toolbar: path row, then the actions that work on the selection
+            pathLabel = new Label { Text = "Drive / folder:", AutoSize = true, ForeColor = Theme.FG, BackColor = Theme.BG, Font = Theme.FONT };
+            pathBox = new PathInput();
             foreach (var d in DriveInfo.GetDrives())
-                if (d.IsReady) pathBox.Items.Add(d.Name);
-            pathBox.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; StartScan(); } };
-            pathBox.ComboBox.SelectionChangeCommitted += (s, e) => BeginInvoke(new Action(StartScan));
+                if (d.IsReady) pathBox.Choices.Add(d.Name);
+            pathBox.Submitted += (s, e) => StartScan();
+            pathBox.ChoiceCommitted += (s, e) => StartScan();
+            tips.SetToolTip(pathBox.Box, "Drive or folder to analyze (you can also drag a folder onto the window)");
 
-            btnBrowse = Btn("Browse...", "Choose a folder", Browse);
-            btnScan = Btn("Scan", "Analyze the drive or folder (Enter)", StartScan);
-            btnScan.Font = new Font(Font, FontStyle.Bold);
-            btnStop = Btn("Stop", "Stop the scan and show partial results", () => { if (scanner != null) scanner.Cancel(); });
-            btnUp = Btn("Up", "Go to the parent folder (Backspace)", GoUp);
-            btnRescan = Btn("Rescan folder", "Rescan the selected folder (F5)", RescanSelected);
-            btnExplorer = Btn("Show in Explorer", "Open the selected item in Windows Explorer", ShowInExplorer);
-            btnDelete = Btn("Delete permanently", "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
-            btnDelete.ForeColor = Color.FromArgb(180, 30, 30);
-            btnAdmin = Btn("Run as administrator", "Restart elevated to read folders that need admin rights", RestartAsAdmin);
-            btnAdmin.Alignment = ToolStripItemAlignment.Right;
-            btnAdmin.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
-            try { btnAdmin.Image = new Icon(SystemIcons.Shield, S(16), S(16)).ToBitmap(); } catch (Exception) { }
+            btnBrowse = Btn("Browse...", ButtonKind.Secondary, "Choose a folder", Browse);
+            btnScan = Btn("Scan", ButtonKind.Primary, "Analyze the drive or folder (Enter)", StartScan);
+            btnAdmin = Btn("Run as administrator", ButtonKind.Secondary, "Restart elevated to read folders that need admin rights", RestartAsAdmin);
             btnAdmin.Visible = !isAdmin;
+            btnUp = Btn("Up", ButtonKind.Secondary, "Go to the parent folder (Backspace)", GoUp);
+            btnRescan = Btn("Rescan folder", ButtonKind.Secondary, "Rescan the selected folder (F5)", RescanSelected);
+            btnExplorer = Btn("Show in Explorer", ButtonKind.Secondary, "Open the selected item in Windows Explorer", ShowInExplorer);
+            btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
 
-            tool.Items.Add(new ToolStripLabel("Drive / folder:"));
-            tool.Items.Add(pathBox);
-            tool.Items.Add(btnBrowse);
-            tool.Items.Add(btnScan);
-            tool.Items.Add(btnStop);
-            tool.Items.Add(new ToolStripSeparator());
-            tool.Items.Add(btnUp);
-            tool.Items.Add(btnRescan);
-            tool.Items.Add(btnExplorer);
-            tool.Items.Add(new ToolStripSeparator());
-            tool.Items.Add(btnDelete);
-            tool.Items.Add(btnAdmin);
+            toolbar = new Panel { Dock = DockStyle.Top, BackColor = Theme.BG };
+            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete });
+            toolbar.Layout += (s, e) => LayoutToolbar();
 
             // Context menu
-            menu = new ContextMenuStrip();
+            menu = new ContextMenuStrip
+            {
+                Renderer = new DarkRenderer(), BackColor = Theme.SURFACE, ForeColor = Theme.FG, Font = Theme.FONT,
+                ShowImageMargin = false, Padding = new Padding(0, S(4), 0, S(4)), DropShadowEnabled = !Theme.HasDwmCorners
+            };
             miOpen = new ToolStripMenuItem("Open folder", null, (s, e) => OpenSelected());
             miExplorer = new ToolStripMenuItem("Show in Explorer", null, (s, e) => ShowInExplorer());
             miCopy = new ToolStripMenuItem("Copy path", null, (s, e) => CopyPath());
             miRescan = new ToolStripMenuItem("Rescan folder", null, (s, e) => RescanSelected()) { ShortcutKeyDisplayString = "F5" };
-            miDelete = new ToolStripMenuItem("Delete permanently...", null, (s, e) => DeleteSelected()) { ShortcutKeyDisplayString = "Del", ForeColor = btnDelete.ForeColor };
+            miDelete = new ToolStripMenuItem("Delete permanently...", null, (s, e) => DeleteSelected()) { ShortcutKeyDisplayString = "Del" };
             menu.Items.AddRange(new ToolStripItem[] { miOpen, miExplorer, miCopy, miRescan, new ToolStripSeparator(), miDelete });
+            foreach (ToolStripItem it in menu.Items) it.ForeColor = Theme.FG;
+            miDelete.ForeColor = Theme.WARN_FG;
+            menu.Opened += (s, e) => Theme.RoundPopup(menu.Handle);
             menu.Opening += (s, e) =>
             {
                 if (menu.SourceControl != null) lastView = menu.SourceControl;
@@ -117,58 +110,88 @@ namespace DiskSpaceAnalyzer
                 miDelete.Enabled = any;
             };
 
-            // Folder tree
-            tree = new TreeView
+            // Folder tree. The image list only reserves the icon slot; glyphs are drawn by the tree.
+            tree = new DarkTreeView
             {
-                Dock = DockStyle.Fill, HideSelection = false, ShowLines = false, FullRowSelect = true,
-                ImageList = icons, ImageKey = "folder", SelectedImageKey = "folder", ItemHeight = S(22),
-                ContextMenuStrip = menu, BorderStyle = BorderStyle.None
+                Dock = DockStyle.None, ItemHeight = S(26), Indent = S(20), ContextMenuStrip = menu,
+                ImageList = new ImageList { ImageSize = new Size(S(16), S(16)) }
             };
-            tree.HandleCreated += (s, e) => Native.SetWindowTheme(tree.Handle, "explorer", null);
             tree.BeforeExpand += (s, e) => Populate(e.Node);
             tree.AfterSelect += (s, e) => { var d = e.Node.Tag as DirNode; if (d != null) ShowContents(d); };
             tree.NodeMouseClick += (s, e) => { if (e.Button == MouseButtons.Right) tree.SelectedNode = e.Node; };
             tree.Enter += (s, e) => lastView = tree;
+            var treePanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill, TrackFocus = true };
+            treePanel.Controls.Add(new ScrollHost(tree) { Dock = DockStyle.Fill });
 
             // Folder contents
-            contents = new SizeListView { Dock = DockStyle.Fill, SmallImageList = icons, ContextMenuStrip = menu, BorderStyle = BorderStyle.None };
+            contents = new SizeListView { ContextMenuStrip = menu };
             contents.SetColumns(new[] { "Name", "Size", "% of folder", "Files", "Folders", "Modified" },
-                new[] { "name", "size", "size", "files", "dirs", "mod" }, new[] { 320, 90, 170, 90, 80, 130 }, scale);
+                new[] { "name", "size", "size", "files", "dirs", "mod" }, new[] { 320, 90, 170, 90, 80, 140 });
             contents.BarColumn = 2;
             contents.ColumnClick += (s, e) => contents.SortBy(e.Column);
             contents.DoubleClick += (s, e) => OpenSelected();
             contents.Enter += (s, e) => lastView = contents;
 
             // Largest files
-            largest = new SizeListView { Dock = DockStyle.Fill, SmallImageList = icons, ContextMenuStrip = menu, BorderStyle = BorderStyle.None };
+            largest = new SizeListView { ContextMenuStrip = menu };
             largest.SetColumns(new[] { "Name", "Size", "Folder", "Modified" },
-                new[] { "name", "size", "folder", "mod" }, new[] { 260, 90, 520, 130 }, scale);
+                new[] { "name", "size", "folder", "mod" }, new[] { 260, 90, 520, 140 });
             largest.ColumnClick += (s, e) => largest.SortBy(e.Column);
             largest.DoubleClick += (s, e) => OpenSelected();
             largest.Enter += (s, e) => lastView = largest;
 
-            tabs = new TabControl { Dock = DockStyle.Fill };
-            var p1 = new TabPage("Folder contents");
-            p1.Controls.Add(contents);
-            var p2 = new TabPage("Largest files (top " + TopCount + ")");
-            p2.Controls.Add(largest);
-            tabs.TabPages.Add(p1);
-            tabs.TabPages.Add(p2);
+            contentsHost = new ScrollHost(contents) { Dock = DockStyle.Fill };
+            largestHost = new ScrollHost(largest) { Dock = DockStyle.Fill, Visible = false };
+            tabs = new TabStrip("Folder contents", "Largest files (top " + TopCount + ")") { Dock = DockStyle.Top };
+            tabs.SelectedIndexChanged += (s, e) =>
+            {
+                contentsHost.Visible = tabs.SelectedIndex == 0;
+                largestHost.Visible = tabs.SelectedIndex == 1;
+            };
+            var listPanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill, TrackFocus = true };
+            var gap = new Panel { Dock = DockStyle.Top, Height = S(6), BackColor = Theme.SURFACE };
+            listPanel.Controls.Add(contentsHost);
+            listPanel.Controls.Add(largestHost);
+            listPanel.Controls.Add(gap);
+            listPanel.Controls.Add(tabs);
 
-            split = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = S(5) };
-            split.Panel1.Controls.Add(tree);
-            split.Panel2.Controls.Add(tabs);
+            split = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = S(10), BackColor = Theme.BG };
+            split.Panel1.BackColor = Theme.BG;
+            split.Panel2.BackColor = Theme.BG;
+            split.Panel1.Controls.Add(treePanel);
+            split.Panel2.Controls.Add(listPanel);
 
-            // Status bar
-            var status = new StatusStrip { SizingGrip = true };
-            statusLabel = new ToolStripStatusLabel("Choose a drive or folder and press Scan.") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            progress = new ToolStripProgressBar { Style = ProgressBarStyle.Marquee, Visible = false, Width = S(140) };
-            driveLabel = new ToolStripStatusLabel("") { BorderSides = ToolStripStatusLabelBorderSides.Left };
-            status.Items.AddRange(new ToolStripItem[] { statusLabel, progress, driveLabel });
+            // Status line
+            var status = new Panel { Dock = DockStyle.Bottom, Height = Theme.FONT_9.Height + S(16), BackColor = Theme.BG };
+            statusLabel = new Label
+            {
+                Text = "Choose a drive or folder and press Scan.", Dock = DockStyle.Fill, AutoEllipsis = true, UseMnemonic = false,
+                Font = Theme.FONT_9, ForeColor = Theme.MUTED, BackColor = Theme.BG, TextAlign = ContentAlignment.MiddleLeft
+            };
+            driveLabel = new Label
+            {
+                Dock = DockStyle.Right, AutoSize = true, Font = Theme.FONT_9, ForeColor = Theme.MUTED, BackColor = Theme.BG,
+                TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, S(8), 0, 0)
+            };
+            status.Controls.Add(statusLabel);
+            status.Controls.Add(driveLabel);
+
+            overlay = new BusyOverlay();
+            overlay.CancelButton.Click += (s, e) =>
+            {
+                if (scanner == null) return;
+                scanner.Cancel();
+                overlay.CancelButton.Enabled = false;
+            };
 
             Controls.Add(split);
-            Controls.Add(tool);
+            Controls.Add(toolbar);
             Controls.Add(status);
+            Controls.Add(overlay);
+            // The overlay covers the whole client area (toolbar and status line too), so it is anchored, not docked.
+            overlay.Bounds = ClientRectangle;
+            overlay.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            overlay.BringToFront();
 
             uiTimer = new System.Windows.Forms.Timer { Interval = 150 };
             uiTimer.Tick += (s, e) => UpdateProgress();
@@ -192,26 +215,66 @@ namespace DiskSpaceAnalyzer
                 {
                     string sys = Path.GetPathRoot(Environment.SystemDirectory);
                     pathBox.Text = sys;
-                    pathBox.Focus();
+                    pathBox.Box.Focus();
                 }
             };
             FormClosing += (s, e) => { if (scanner != null) scanner.Cancel(); };
             UpdateButtons();
         }
 
-        int S(int v) { return (int)Math.Round(v * scale); }
-
-        static ToolStripButton Btn(string text, string tip, Action click)
+        protected override void OnHandleCreated(EventArgs e)
         {
-            var b = new ToolStripButton(text) { DisplayStyle = ToolStripItemDisplayStyle.Text, ToolTipText = tip };
+            base.OnHandleCreated(e);
+            Theme.DarkTitleBar(Handle);
+        }
+
+        static int S(int v) { return Theme.S(v); }
+
+        RoundButton Btn(string text, ButtonKind kind, string tip, Action click)
+        {
+            var b = new RoundButton(text, kind);
             b.Click += (s, e) => click();
+            tips.SetToolTip(b, tip);
             return b;
+        }
+
+        void LayoutToolbar()
+        {
+            int w = toolbar.ClientSize.Width, gap = S(6), groupGap = S(16);
+            var bs = btnScan.GetPreferredSize(Size.Empty);
+            int h = Math.Max(bs.Height, pathBox.PreferredHeight);
+
+            int right = w;
+            if (btnAdmin.Visible)
+            {
+                var a = btnAdmin.GetPreferredSize(Size.Empty);
+                btnAdmin.Bounds = new Rectangle(w - a.Width, 0, a.Width, h);
+                right = btnAdmin.Left - groupGap;
+            }
+            var sb = btnScan.GetPreferredSize(Size.Empty);
+            btnScan.Bounds = new Rectangle(right - sb.Width, 0, sb.Width, h);
+            var bb = btnBrowse.GetPreferredSize(Size.Empty);
+            btnBrowse.Bounds = new Rectangle(btnScan.Left - gap - bb.Width, 0, bb.Width, h);
+            pathLabel.Location = new Point(0, (h - pathLabel.Height) / 2);
+            int px = pathLabel.Right + gap;
+            pathBox.Bounds = new Rectangle(px, 0, Math.Max(S(120), btnBrowse.Left - gap - px), h);
+
+            int x = 0, y = h + S(8);
+            foreach (var b in new[] { btnUp, btnRescan, btnExplorer, btnDelete })
+            {
+                if (b == btnDelete) x += groupGap - gap;
+                var p = b.GetPreferredSize(Size.Empty);
+                b.Bounds = new Rectangle(x, y, p.Width, h);
+                x += p.Width + gap;
+            }
+            int total = y + h + S(10);
+            if (toolbar.Height != total) toolbar.Height = total;
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (pathBox.Focused) return;
+            if (pathBox.Box.Focused) return;
             if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.F5) { RescanSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.Back) { GoUp(); e.Handled = true; }
@@ -286,20 +349,25 @@ namespace DiskSpaceAnalyzer
         void SetBusy(bool value)
         {
             busy = value;
-            progress.Visible = value;
-            if (value) uiTimer.Start(); else uiTimer.Stop();
+            if (value)
+            {
+                overlay.ShowBusy("Starting...", scanner != null);
+                uiTimer.Start();
+            }
+            else
+            {
+                uiTimer.Stop();
+                overlay.HideBusy();
+            }
             split.Enabled = !value;
-            UseWaitCursor = false;
             UpdateButtons();
         }
 
         void UpdateButtons()
         {
-            bool scanning = busy && scanner != null;
             btnScan.Enabled = !busy;
             btnBrowse.Enabled = !busy;
             pathBox.Enabled = !busy;
-            btnStop.Enabled = scanning;
             btnUp.Enabled = !busy && current != null && current.Parent != null;
             btnRescan.Enabled = !busy && root != null;
             btnExplorer.Enabled = !busy && root != null;
@@ -311,11 +379,15 @@ namespace DiskSpaceAnalyzer
             var s = scanner;
             var j = deleteJob;
             if (s != null)
-                statusLabel.Text = string.Format("Scanning... {0:N0} folders, {1:N0} files, {2}    {3}",
-                    Interlocked.Read(ref s.DirsSeen), Interlocked.Read(ref s.FilesSeen), Fmt.Size(Interlocked.Read(ref s.BytesSeen)),
-                    Fmt.Shorten(s.Current, 90));
+            {
+                string text = s.Cancelled
+                    ? "Cancelling... (finishing current folder)"
+                    : string.Format("Scanning: {0:N0} folders, {1:N0} files, {2} so far",
+                        Interlocked.Read(ref s.DirsSeen), Interlocked.Read(ref s.FilesSeen), Fmt.Size(Interlocked.Read(ref s.BytesSeen)));
+                overlay.SetStatus(text, Fmt.Shorten(s.Current, 80));
+            }
             else if (j != null)
-                statusLabel.Text = string.Format("Deleting... {0:N0} files removed    {1}", Interlocked.Read(ref j.FilesDeleted), Fmt.Shorten(j.Current, 90));
+                overlay.SetStatus(string.Format("Deleting: {0:N0} files removed", Interlocked.Read(ref j.FilesDeleted)), Fmt.Shorten(j.Current, 80));
         }
 
         void UpdateDriveLabel()
@@ -367,8 +439,8 @@ namespace DiskSpaceAnalyzer
 
         static TreeNode MakeTreeNode(DirNode d)
         {
-            var tn = new TreeNode(TreeText(d)) { Tag = d, ImageKey = "folder", SelectedImageKey = "folder" };
-            if (d.Denied) tn.ForeColor = Color.Gray;
+            var tn = new TreeNode(TreeText(d)) { Tag = d, Name = d.Name };
+            if (d.Denied) tn.ForeColor = Theme.MUTED;
             if (d.Children != null && d.Children.Count > 0) tn.Nodes.Add(new TreeNode("..."));
             return tn;
         }
@@ -469,14 +541,14 @@ namespace DiskSpaceAnalyzer
                 {
                     it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %",
                     it.Files.ToString("N0"), it.IsDir ? it.Dirs.ToString("N0") : "", Fmt.Date(it.Modified)
-                }) { Tag = it, ImageKey = it.IsDir ? "folder" : "file" };
-                if (it.IsSummary) { lvi.ForeColor = Color.Gray; lvi.ImageKey = null; }
-                else if (it.IsDir && it.Dir.Denied) lvi.ForeColor = Color.Gray;
+                }) { Tag = it };
+                if (it.IsSummary) lvi.ForeColor = Theme.MUTED;
+                else if (it.IsDir && it.Dir.Denied) lvi.ForeColor = Theme.MUTED;
                 return lvi;
             }).ToArray());
             contents.EndUpdate();
 
-            tabs.TabPages[0].Text = "Folder contents: " + Fmt.Shorten(d.Parent == null ? d.Name : d.Name, 40) + "  (" + Fmt.Size(d.Size) + ")";
+            tabs.SetTitle(0, "Folder contents: " + Fmt.Shorten(d.Name, 40) + "  (" + Fmt.Size(d.Size) + ")");
             UpdateButtons();
         }
 
@@ -493,7 +565,7 @@ namespace DiskSpaceAnalyzer
             largest.Items.Clear();
             largest.Items.AddRange(items.Select(it => new ListViewItem(new[] { it.Name, Fmt.Size(it.Size), it.Folder, Fmt.Date(it.Modified) })
             {
-                Tag = it, ImageKey = "file"
+                Tag = it
             }).ToArray());
             largest.EndUpdate();
         }

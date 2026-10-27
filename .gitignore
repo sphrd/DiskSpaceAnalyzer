@@ -5,6 +5,7 @@ bin/
 
 # Generated icon (recreated by tools/make_icon.ps1 during build)
 assets/app.ico
+assets/app.png
 
 # IDE / OS
 .vs/

@@ -92,16 +92,18 @@ namespace DiskSpaceAnalyzer
         }
     }
 
-    /// <summary>Details list view that draws a percentage bar in one column.</summary>
-    internal sealed class SizeListView : ListView
+    /// <summary>Details list view drawn in the palette, with a percentage bar column and pill scrollbar support.</summary>
+    internal sealed class SizeListView : ListView, IScrollNotify
     {
         public int BarColumn = -1;
         public string[] Keys;
         public string[] Titles;
         public readonly ItemComparer Sorter = new ItemComparer();
+        public event EventHandler ScrollChanged;
         int sortColumn = 1;
-        static readonly Color BarColor = Color.FromArgb(58, 125, 214);
-        static readonly Color BarBack = Color.FromArgb(228, 232, 238);
+        HeaderPainter header;
+        const TextFormatFlags CellFlags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine |
+            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
 
         public SizeListView()
         {
@@ -111,9 +113,15 @@ namespace DiskSpaceAnalyzer
             HideSelection = false;
             OwnerDraw = true;
             AllowColumnReorder = true;
+            BorderStyle = BorderStyle.None;
+            BackColor = Theme.SURFACE;
+            ForeColor = Theme.FG;
+            Font = Theme.FONT;
+            // Rows are as tall as this (invisible) image list; icons are drawn as glyphs.
+            SmallImageList = new ImageList { ImageSize = new Size(1, Theme.S(26)) };
         }
 
-        public void SetColumns(string[] titles, string[] keys, int[] widths, float scale)
+        public void SetColumns(string[] titles, string[] keys, int[] widths)
         {
             Titles = titles;
             Keys = keys;
@@ -121,7 +129,7 @@ namespace DiskSpaceAnalyzer
             for (int i = 0; i < titles.Length; i++)
             {
                 bool right = keys[i] == "size" || keys[i] == "files" || keys[i] == "dirs";
-                Columns.Add(titles[i], (int)(widths[i] * scale), right ? HorizontalAlignment.Right : HorizontalAlignment.Left);
+                Columns.Add(titles[i], Theme.S(widths[i]), right ? HorizontalAlignment.Right : HorizontalAlignment.Left);
             }
             UpdateHeaders();
         }
@@ -145,34 +153,131 @@ namespace DiskSpaceAnalyzer
                 Columns[i].Text = Titles[i] + (i == sortColumn ? (Sorter.Ascending ? "  \u25B2" : "  \u25BC") : "");
         }
 
-        protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e) { e.DrawDefault = true; }
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            IntPtr h = Theme.SendMessage(Handle, 0x101F, IntPtr.Zero, IntPtr.Zero); // LVM_GETHEADER
+            if (h != IntPtr.Zero) header = new HeaderPainter(this, h);
+        }
 
-        protected override void OnDrawItem(DrawListViewItemEventArgs e) { }
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            if (header != null) { header.ReleaseHandle(); header = null; }
+            base.OnHandleDestroyed(e);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            switch (m.Msg)
+            {
+                case 0x0F: case 0x114: case 0x115: case 0x20A: case 0x20E: case 0x05:
+                    if (ScrollChanged != null) ScrollChanged(this, EventArgs.Empty);
+                    break;
+            }
+        }
+
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+        protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
+        {
+            var g = e.Graphics;
+            var r = e.Bounds;
+            using (var b = new SolidBrush(Theme.SURFACE)) g.FillRectangle(b, r);
+            using (var p = new Pen(Theme.BORDER))
+            {
+                g.DrawLine(p, r.X, r.Bottom - 1, r.Right, r.Bottom - 1);
+                g.DrawLine(p, r.Right - 1, r.Y + Theme.S(6), r.Right - 1, r.Bottom - Theme.S(6));
+            }
+            var flags = CellFlags | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left);
+            var tr = new Rectangle(r.X + Theme.S(6), r.Y, r.Width - Theme.S(12), r.Height);
+            TextRenderer.DrawText(g, e.Header.Text, Font, tr, e.ColumnIndex == sortColumn ? Theme.ACCENT : Theme.MUTED, flags);
+        }
+
+        protected override void OnDrawItem(DrawListViewItemEventArgs e)
+        {
+            var g = e.Graphics;
+            var r = e.Bounds;
+            using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, r);
+            if (!e.Item.Selected) return;
+            Color fill = Focused ? Theme.ACCENT : Theme.BORDER;
+            Theme.FillRound(g, new Rectangle(r.X + Theme.S(2), r.Y + 1, r.Width - Theme.S(4), r.Height - 2), Theme.S(6), fill, fill);
+        }
 
         protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
         {
-            if (e.ColumnIndex != BarColumn) { e.DrawDefault = true; return; }
             var info = e.Item.Tag as ItemInfo;
-            double pct = info != null ? info.Percent : 0;
             var g = e.Graphics;
             var r = e.Bounds;
-            bool sel = e.Item.Selected;
-            Color back = sel ? (Focused ? SystemColors.Highlight : SystemColors.Control) : BackColor;
-            using (var b = new SolidBrush(back)) g.FillRectangle(b, r);
+            bool strong = e.Item.Selected && Focused;
+            Color fore = strong ? Theme.BG : e.Item.ForeColor;
+            int pad = Theme.S(6);
 
-            int pad = Math.Max(2, r.Height / 5);
-            int textW = TextRenderer.MeasureText("100.0 %", Font).Width;
-            var bar = new Rectangle(r.X + pad, r.Y + pad, Math.Max(0, r.Width - textW - 3 * pad), r.Height - 2 * pad);
-            if (bar.Width > 4 && info != null && !info.IsSummary)
+            if (e.ColumnIndex == 0)
             {
-                using (var b = new SolidBrush(BarBack)) g.FillRectangle(b, bar);
-                int w = (int)Math.Round(bar.Width * Math.Min(100, Math.Max(0, pct)) / 100);
-                if (w > 0) using (var b = new SolidBrush(BarColor)) g.FillRectangle(b, bar.X, bar.Y, w, bar.Height);
+                // Sub-item 0 spans the whole row; clip it to the first column.
+                r = new Rectangle(r.X, r.Y, Columns[0].Width, r.Height);
+                int icon = Theme.S(16);
+                if (info != null && !info.IsSummary)
+                {
+                    var ir = new Rectangle(r.X + pad, r.Y + (r.Height - icon) / 2, icon, icon);
+                    Color ic = strong ? Theme.BG : Theme.MUTED;
+                    if (info.IsDir) Theme.DrawFolder(g, ir, ic); else Theme.DrawFile(g, ir, ic);
+                }
+                var tr = new Rectangle(r.X + pad + icon + Theme.S(6), r.Y, Math.Max(0, r.Width - pad - icon - Theme.S(12)), r.Height);
+                TextRenderer.DrawText(g, e.SubItem.Text, Font, tr, fore, CellFlags);
+                return;
             }
-            var tr = new Rectangle(r.Right - textW - pad, r.Y, textW, r.Height);
-            Color fore = sel && Focused ? SystemColors.HighlightText : e.Item.ForeColor;
-            TextRenderer.DrawText(g, e.SubItem.Text, Font, tr, fore,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+
+            if (e.ColumnIndex == BarColumn)
+            {
+                double pct = info != null ? info.Percent : 0;
+                int textW = TextRenderer.MeasureText("100.0 %", Font).Width;
+                int bh = Theme.S(8);
+                var bar = new Rectangle(r.X + pad, r.Y + (r.Height - bh) / 2, Math.Max(0, r.Width - textW - 2 * pad), bh);
+                if (bar.Width > 8 && info != null && !info.IsSummary)
+                {
+                    Color track = strong ? Theme.BG : Theme.BORDER;
+                    Color fill = strong ? Theme.FG : Theme.ACCENT;
+                    Theme.FillRound(g, bar, bh / 2, track, track);
+                    int w = (int)Math.Round(bar.Width * Math.Min(100, Math.Max(0, pct)) / 100);
+                    if (w > 0) Theme.FillRound(g, new Rectangle(bar.X, bar.Y, Math.Max(w, bh), bh), bh / 2, fill, fill);
+                }
+                TextRenderer.DrawText(g, e.SubItem.Text, Font, new Rectangle(r.Right - textW - pad, r.Y, textW, r.Height), fore,
+                    CellFlags | TextFormatFlags.Right);
+                return;
+            }
+
+            var flags = CellFlags | (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left);
+            TextRenderer.DrawText(g, e.SubItem.Text, Font, new Rectangle(r.X + pad, r.Y, Math.Max(0, r.Width - 2 * pad), r.Height), fore, flags);
+        }
+
+        /// <summary>Paints the header area to the right of the last column, which owner-draw does not cover.</summary>
+        sealed class HeaderPainter : NativeWindow
+        {
+            readonly ListView owner;
+
+            public HeaderPainter(ListView owner, IntPtr handle)
+            {
+                this.owner = owner;
+                AssignHandle(handle);
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                base.WndProc(ref m);
+                if (m.Msg != 0x0F && m.Msg != 0x14) return;
+                int right = -Theme.GetScroll(owner.Handle, false).Pos;
+                foreach (ColumnHeader c in owner.Columns) right += c.Width;
+                using (var g = Graphics.FromHwnd(Handle))
+                {
+                    var rc = Rectangle.Truncate(g.VisibleClipBounds);
+                    if (right >= rc.Right) return;
+                    using (var b = new SolidBrush(Theme.SURFACE)) g.FillRectangle(b, right, 0, rc.Right - right, rc.Bottom);
+                    using (var p = new Pen(Theme.BORDER)) g.DrawLine(p, right, rc.Bottom - 1, rc.Right, rc.Bottom - 1);
+                }
+            }
         }
     }
 }
