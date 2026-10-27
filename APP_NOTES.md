@@ -77,5 +77,5 @@ Part 3's PyInstaller/venv/splash sections do not apply.
 ## Releases
 
 - v1.0.0 (2026-10-27): first release, light WinForms UI, ~66 KB.
-- Restyle (2026-10-27, not yet released): design-language dark theme, ~96 KB. Verified: Program Files scan
+- v1.1.0 (2026-10-27): design-language dark theme restyle, ~96 KB. Verified: Program Files scan
   matches pre-restyle counts; cancel, rescan and permanent delete on a sandbox folder work on the real exe.
