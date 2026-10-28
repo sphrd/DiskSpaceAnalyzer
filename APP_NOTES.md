@@ -18,6 +18,8 @@ patterns (Part 3) are applied through the WinForms mapping below.
 | Pie chart pane (donut linked to the contents list) | `src/Chart.cs` |
 | Scanner / deleter / interop (domain, not UI) | `src/Scanner.cs`, `src/Deleter.cs`, `src/Native.cs` |
 | Asset generator (icon `.ico`, 256 px `app.png` for the README, 1280x640 `social-preview.png` for GitHub) | `tools/make_icon.ps1` (run by every build) |
+| macOS app (Swift + AppKit, one target) | `macos/Sources/DiskSpaceAnalyzer/*.swift`; `Tokens.swift` is generated from `src/Theme.cs` by `macos/gen_tokens.py` (git-ignored) |
+| macOS build | `macos/build.sh` -> universal `Disk Space Analyzer.app` (arm64 + x86_64), ad-hoc signed, packed into `DiskSpaceAnalyzer-macOS.dmg` at the repo root; version from `src/Program.cs`, icon from `assets/app-1024.png` |
 | Build script | `build.ps1` -> compiles into `bin/`, moves `DiskSpaceAnalyzer.exe` to the repo root (git-ignored), deletes `bin/` |
 | Version | `src/Program.cs` (`AssemblyVersion` / `AssemblyFileVersion`), `src/app.manifest` |
 
@@ -90,6 +92,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - 2026-10-28: "do the macos dmg. but before that, why did you put the about and update in the help button? make it a menu bar
   item on the top. make two buttons About, Check for updates. Also update the design language and choices into the App
   design agent file on github."
+- 2026-10-28 (macOS): user asked for the macOS dmg in the same repository and the same release flow; Mac available for
+  final hands-on checks.
+- 2026-10-28: "why the menu bar is there? it should be next to the apps logo and name. on that bar. like every other app."
 - 2026-10-28: "reduce the default app size. it doesnt fit in my screen." (1920x1080 at 125 %: 1500x880 became
   1875x995 px and `CenterScreen` pushed it below the taskbar.)
 
@@ -141,13 +146,33 @@ patterns (Part 3) are applied through the WinForms mapping below.
 
 ## Decisions and gotchas
 
+- **macOS version:** native Swift/AppKit app, same behaviour and look as Windows (three panels, linked chart, scan bar,
+  update banner, About, logo morph), built and checked only on GitHub's macOS runners (this machine is Windows): the
+  `macos` CI job runs `build.sh`, a headless `--cli scan /usr/share` and `--cli screenshot` (views render themselves
+  into PNGs, no screen-recording permission needed), and attaches `DiskSpaceAnalyzer-macOS.dmg` to the same release as
+  the exe. Scanner: `getattrlistbulk` on 8-32 threads, does not follow symlinks and skips every other mount point
+  (`getmntinfo`), so on `/` the data volume under `/System/Volumes/Data` is not counted twice (its content is reached
+  through the firmlinks `/Users`, `/Applications`...). Drives: `mountedVolumeURLs` with `skipHiddenVolumes`, local and
+  browsable only; refreshed on mount/unmount. Free space uses `volumeAvailableCapacityForImportantUsage`.
+  macOS-only differences: "Choose..." instead of "Browse...", "Show in Finder", "Full Disk Access..." instead of "Run
+  as administrator" (opens the privacy setting), About and Check for Updates in the app menu of the system menu bar,
+  Cmd+R rescan, Cmd+Backspace delete, Cmd+Up up. Unsigned (no Developer ID): first launch needs right-click > Open.
+  The updater downloads `DiskSpaceAnalyzer-macOS.dmg`, verifies it, mounts it, copies the app next to the running one
+  and swaps the bundles (`.old` removed at next start); if the app runs from the disk image or a read-only place it
+  asks to move it to Applications or links to the release page.
+- Windows CI first, then macOS (`needs: build`), so a tag produces both artefacts on one release. Branches `dev/**`
+  also build (no release), which is how the macOS app is compiled and checked before merging.
 - **Updates:** 3 s after start the app asks `api.github.com/repos/sphrd/DiskSpaceAnalyzer/releases/latest` (no token;
   drafts and pre-releases are never offered). If the tag (`vX.Y.Z`) is newer than the exe's `AssemblyVersion`, an
   attention banner (warn tokens, §2.4) offers Update now / What's new / Later; automatic checks are silent otherwise.
-  Manual check: Check for updates in the menu bar, the About window's button, or the version label at the bottom right.
-- Menu bar at the very top of the window (`MenuStrip` with `DarkRenderer { Bar = true }`: `bg` background, no outline,
-  hovered item `border` rounded): two direct items, **About** (F1) and **Check for updates**, no drop-downs. Replaced a
-  "Help" button in the toolbar on the user's request. The logo drawing lives in `Theme.DrawLogo` (chart pane + About). Update now: download `DiskSpaceAnalyzer.exe` to
+  Manual check: Check for updates in the title bar, the About window's button, or the version label at the bottom right.
+- Custom title bar (`TitleBar` in `Widgets.cs`) replaces the native caption: app logo, app name, then the menu items
+  **About** (F1) and **Check for updates** right next to the name, and drawn minimise / maximise / close buttons (close
+  hover `#c42b1c`, the Windows convention). `WM_NCCALCSIZE` removes the caption but keeps the native resize borders,
+  shadow and Snap; `WM_NCHITTEST` returns HTCAPTION for empty title-bar space (drag, double-click to maximise, system
+  menu) and HTTOP* in the top resize strip. Maximised, the client top is moved below the off-screen frame part. History:
+  a Help button in the toolbar, then a separate menu bar row under the caption; the user wanted the items on the title
+  bar "like every other app". The logo drawing lives in `Theme.DrawLogo` (chart pane + About). Update now: download `DiskSpaceAnalyzer.exe` to
   `<exe>.download` with progress and Cancel, check its size and the SHA-256 `digest` GitHub reports for the asset,
   rename the running exe to `<exe>.old` (Windows allows renaming a running exe), move the download into place, then
   Restart now. The next start deletes `.old` / `.download`, retrying for ~15 s because the previous process may still

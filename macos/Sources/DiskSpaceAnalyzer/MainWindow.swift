@@ -79,7 +79,8 @@ final class HoverTable: NSTableView {
         super.draw(dirtyRect)
         if numberOfRows == 0, let t = emptyText {
             let ps = NSMutableParagraphStyle(); ps.alignment = .center
-            (t as NSString).draw(in: NSRect(x: 16, y: 30, width: bounds.width - 32, height: 60),
+            let vis = enclosingScrollView?.documentVisibleRect ?? visibleRect
+            (t as NSString).draw(in: NSRect(x: vis.minX + 16, y: 30, width: vis.width - 32, height: 60),
                                  withAttributes: [.font: Theme.font, .foregroundColor: T.MUTED, .paragraphStyle: ps])
         }
     }
@@ -404,8 +405,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         }
 
         // Lists
-        setUpTable(contents, [("name", "Name", 300, false), ("size", "Size", 90, true), ("pct", "% of folder", 170, true),
-                              ("files", "Files", 80, true), ("dirs", "Folders", 70, true), ("mod", "Modified", 130, false)])
+        setUpTable(contents, [("name", "Name", 230, false), ("size", "Size", 84, true), ("pct", "% of folder", 150, true),
+                              ("files", "Files", 74, true), ("dirs", "Folders", 66, true), ("mod", "Modified", 128, false)])
         setUpTable(largest, [("name", "Name", 240, false), ("size", "Size", 90, true), ("folder", "Folder", 420, false), ("mod", "Modified", 130, false)])
         contents.onHot = { [unowned self] r in self.chart.setHover(self.rowSlice[r] ?? -1) }
         styleScroll(contentsScroll, contents)
@@ -633,6 +634,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             alert("Folder not found:\n" + path); return
         }
         pathField.stringValue = path
+        pathField.currentEditor()?.selectedRange = NSRange(location: path.count, length: 0)
+        window?.makeFirstResponder(outline)
         var r = findRoot(path)
         let isNew = r == nil
         if r == nil { let n = ScanRoot(path: path); refreshCapacity(n); roots.append(n); sortRoots(); r = n }

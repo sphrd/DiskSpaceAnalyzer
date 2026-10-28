@@ -31,6 +31,8 @@ namespace DiskSpaceAnalyzer
         public static readonly Color WARN_BORDER = Hex(0x5a4a2a);
         public static readonly Color PILL = Hex(0x5c6470);
         public static readonly Color PILL_HOVER = Hex(0x7a828e);
+        // Close button hover in the custom title bar: the Windows convention (not a design-language hue).
+        public static readonly Color CLOSE_HOVER = Hex(0xc42b1c);
 
         // Data visualisation only (pie chart): shades of the accent, alternating light/dark so neighbours separate,
         // plus greys for "free space" and catch-all slices.

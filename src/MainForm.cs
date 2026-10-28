@@ -53,7 +53,7 @@ namespace DiskSpaceAnalyzer
         readonly PathInput pathBox;
         readonly Label pathLabel;
         readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
-        readonly MenuStrip menuBar;
+        readonly TitleBar titleBar;
         readonly Panel toolbar;
         readonly SplitContainer split, split2;
         readonly PieChart chart;
@@ -87,7 +87,7 @@ namespace DiskSpaceAnalyzer
             Location = new Point(wa.X + (wa.Width - Width) / 2, wa.Y + (wa.Height - Height) / 2);
             KeyPreview = true;
             AllowDrop = true;
-            Padding = new Padding(S(15), 0, S(15), 0);   // the menu bar on top brings its own spacing
+            Padding = new Padding(S(15), S(36) + S(4), S(15), 0);   // top: the custom title bar (placed at 0,0 below)
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
             // Toolbar: path row, then the actions that work on the selection
@@ -268,25 +268,28 @@ namespace DiskSpaceAnalyzer
                 scanner.Cancel();
                 scanBar.CancelButton.Enabled = false;
             };
-            // Menu bar at the very top: two direct actions (no drop-downs).
-            menuBar = new MenuStrip
-            {
-                Dock = DockStyle.Top, Renderer = new DarkRenderer { Bar = true }, BackColor = Theme.BG, ForeColor = Theme.FG,
-                Font = Theme.FONT_9, GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(0, S(2), 0, S(6))
-            };
-            menuBar.Items.Add(new ToolStripMenuItem("About", null, (s, e) => ShowAbout()) { ForeColor = Theme.FG, ToolTipText = "About Disk Space Analyzer (F1)" });
-            menuBar.Items.Add(new ToolStripMenuItem("Check for updates", null, (s, e) => updateBanner.Check(true)) { ForeColor = Theme.FG });
-            MainMenuStrip = menuBar;
+            // Custom title bar (logo, name, menu items, window buttons) replacing the native caption. It spans the full
+            // width, so it is placed at (0, 0) and anchored instead of docked (docking would respect the side padding).
+            titleBar = new TitleBar();
+            titleBar.AddItem("About", ShowAbout);
+            titleBar.AddItem("Check for updates", () => updateBanner.Check(true));
+            Activated += (s, e) => titleBar.Active = true;
+            Deactivate += (s, e) => titleBar.Active = false;
+            Resize += (s, e) => titleBar.Invalidate();
+            TextChanged += (s, e) => titleBar.Invalidate();
 
             Controls.Add(split);
             Controls.Add(scanBar);
             Controls.Add(updateBanner);
             Controls.Add(toolbar);
-            Controls.Add(menuBar);
             Controls.Add(status);
+            Controls.Add(titleBar);
+            titleBar.Bounds = new Rectangle(0, 0, ClientSize.Width, titleBar.Height);
+            titleBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(overlay);
-            // The overlay covers the whole client area (toolbar and status line too), so it is anchored, not docked.
-            overlay.Bounds = ClientRectangle;
+            // The overlay covers the client area below the title bar (toolbar and status line too), so it is anchored,
+            // not docked; the title bar stays usable (move, minimise, close) while it shows.
+            overlay.Bounds = new Rectangle(0, titleBar.Height, ClientSize.Width, ClientSize.Height - titleBar.Height);
             overlay.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             overlay.BringToFront();
 
@@ -327,6 +330,46 @@ namespace DiskSpaceAnalyzer
         {
             base.OnHandleCreated(e);
             Theme.DarkTitleBar(Handle);
+            // Recalculate the frame now that WM_NCCALCSIZE removes the caption.
+            SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020);   // NOSIZE|NOMOVE|NOZORDER|NOACTIVATE|FRAMECHANGED
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern int GetSystemMetrics(int index);
+
+        /// <summary>
+        /// Removes the native caption but keeps the resize borders: after the default calculation, the client area's top
+        /// edge is put back where the window's top is (when maximised, below the part that sticks out of the screen).
+        /// </summary>
+        bool CustomFrame(ref Message m)
+        {
+            const int WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84;
+            if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero)
+            {
+                int top = System.Runtime.InteropServices.Marshal.ReadInt32(m.LParam, 4);
+                base.WndProc(ref m);
+                if (WindowState == FormWindowState.Maximized)
+                    top += GetSystemMetrics(33) + GetSystemMetrics(92);   // SM_CYSIZEFRAME + SM_CXPADDEDBORDER
+                System.Runtime.InteropServices.Marshal.WriteInt32(m.LParam, 4, top);
+                m.Result = IntPtr.Zero;
+                return true;
+            }
+            if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                if ((int)m.Result != 1) return true;                           // not HTCLIENT: borders etc. stay native
+                var p = PointToClient(new Point((short)((long)m.LParam & 0xFFFF), (short)(((long)m.LParam >> 16) & 0xFFFF)));
+                int edge = GetSystemMetrics(33) + GetSystemMetrics(92);
+                if (WindowState != FormWindowState.Maximized && p.Y < edge)
+                    m.Result = (IntPtr)(p.X < edge * 2 ? 13 : p.X > ClientSize.Width - edge * 2 ? 14 : 12);   // HTTOPLEFT / HTTOPRIGHT / HTTOP
+                else if (titleBar != null && p.Y < titleBar.Height)
+                    m.Result = (IntPtr)2;                                      // HTCAPTION: drag, double-click, Snap, system menu
+                return true;
+            }
+            return false;
         }
 
         static int S(int v) { return Theme.S(v); }
@@ -575,6 +618,7 @@ namespace DiskSpaceAnalyzer
 
         protected override void WndProc(ref Message m)
         {
+            if (CustomFrame(ref m)) return;
             base.WndProc(ref m);
             // WM_DEVICECHANGE: DBT_DEVICEARRIVAL / DBT_DEVICEREMOVECOMPLETE -> refresh the drive list.
             if (m.Msg == 0x219 && (m.WParam == (IntPtr)0x8000 || m.WParam == (IntPtr)0x8004))

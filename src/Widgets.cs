@@ -651,6 +651,145 @@ namespace DiskSpaceAnalyzer
         }
     }
 
+    /// <summary>
+    /// Custom title bar (the native caption is removed by MainForm): app logo, app name, menu items (About, Check for
+    /// updates) and the minimise / maximise / close buttons. Empty parts report HTTRANSPARENT so the form answers
+    /// HTCAPTION there: dragging, double-click to maximise, Snap and the system menu stay native.
+    /// </summary>
+    internal sealed class TitleBar : Control
+    {
+        readonly List<KeyValuePair<string, Action>> items = new List<KeyValuePair<string, Action>>();
+        Rectangle[] itemRects = new Rectangle[0];
+        Rectangle minRect, maxRect, closeRect;
+        int hoverItem = -1;   // menu item index, or 100/101/102 for min/max/close
+        bool active = true;
+
+        public TitleBar()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            SetStyle(ControlStyles.Selectable, false);
+            BackColor = Theme.BG;
+            Font = Theme.FONT;
+            Height = Theme.S(36);
+        }
+
+        public void AddItem(string text, Action action) { items.Add(new KeyValuePair<string, Action>(text, action)); Invalidate(); }
+
+        public bool Active { get { return active; } set { if (active != value) { active = value; Invalidate(); } } }
+
+        int ButtonW { get { return Theme.S(46); } }
+
+        void Measure(Graphics g)
+        {
+            int bw = ButtonW;
+            closeRect = new Rectangle(Width - bw, 0, bw, Height);
+            maxRect = new Rectangle(Width - 2 * bw, 0, bw, Height);
+            minRect = new Rectangle(Width - 3 * bw, 0, bw, Height);
+            int x = Theme.S(12) + Theme.S(20) + Theme.S(8);
+            x += TextRenderer.MeasureText(g, TitleText, Font, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.S(18);
+            itemRects = new Rectangle[items.Count];
+            for (int i = 0; i < items.Count; i++)
+            {
+                int w = TextRenderer.MeasureText(g, items[i].Key, Font, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.S(20);
+                itemRects[i] = new Rectangle(x, Theme.S(5), w, Height - Theme.S(10));
+                x += w + Theme.S(2);
+            }
+        }
+
+        string TitleText { get { var f = FindForm(); return f != null ? f.Text : ""; } }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            Measure(g);
+            Color text = active ? Theme.FG : Theme.MUTED;
+            int ls = Theme.S(20);
+            Theme.DrawLogo(g, new Rectangle(Theme.S(12), (Height - ls) / 2, ls, ls), active ? 1f : 0.6f);
+            const TextFormatFlags f = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding;
+            TextRenderer.DrawText(g, TitleText, Font, new Rectangle(Theme.S(40), 0, Width, Height), text, f);
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (hoverItem == i) Theme.FillRound(g, itemRects[i], Theme.S(6), Theme.BORDER, Theme.BORDER);
+                TextRenderer.DrawText(g, items[i].Key, Font, itemRects[i], hoverItem == i ? Theme.FG : (active ? Theme.MUTED : Theme.DISABLED_FG),
+                    f | TextFormatFlags.HorizontalCenter);
+            }
+            DrawCaptionButton(g, minRect, 100, text);
+            DrawCaptionButton(g, maxRect, 101, text);
+            DrawCaptionButton(g, closeRect, 102, text);
+        }
+
+        void DrawCaptionButton(Graphics g, Rectangle r, int id, Color fore)
+        {
+            if (hoverItem == id)
+                using (var b = new SolidBrush(id == 102 ? Theme.CLOSE_HOVER : Theme.BORDER)) g.FillRectangle(b, r);
+            if (hoverItem == id) fore = Theme.FG;
+            float s = 10 * Theme.Scale, cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f;
+            var sm = g.SmoothingMode;
+            g.SmoothingMode = id == 102 ? System.Drawing.Drawing2D.SmoothingMode.AntiAlias : System.Drawing.Drawing2D.SmoothingMode.None;
+            using (var p = new Pen(fore, Math.Max(1f, Theme.Scale)))
+            {
+                if (id == 100) g.DrawLine(p, cx - s / 2, cy, cx + s / 2, cy);
+                else if (id == 102) { g.DrawLine(p, cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2); g.DrawLine(p, cx + s / 2, cy - s / 2, cx - s / 2, cy + s / 2); }
+                else
+                {
+                    var form = FindForm();
+                    if (form != null && form.WindowState == FormWindowState.Maximized)
+                    {
+                        float o = 2 * Theme.Scale;
+                        g.DrawRectangle(p, cx - s / 2, cy - s / 2 + o, s - o, s - o);
+                        g.DrawLines(p, new[] { new PointF(cx - s / 2 + o, cy - s / 2 + o), new PointF(cx - s / 2 + o, cy - s / 2), new PointF(cx + s / 2, cy - s / 2), new PointF(cx + s / 2, cy + s / 2 - o), new PointF(cx + s / 2 - o, cy + s / 2 - o) });
+                    }
+                    else g.DrawRectangle(p, cx - s / 2, cy - s / 2, s, s);
+                }
+            }
+            g.SmoothingMode = sm;
+        }
+
+        int Hit(Point p)
+        {
+            for (int i = 0; i < itemRects.Length; i++) if (itemRects[i].Contains(p)) return i;
+            if (minRect.Contains(p)) return 100;
+            if (maxRect.Contains(p)) return 101;
+            if (closeRect.Contains(p)) return 102;
+            return -1;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_NCHITTEST = 0x84, HTTRANSPARENT = -1;
+            if (m.Msg == WM_NCHITTEST)
+            {
+                var p = PointToClient(new Point((short)((long)m.LParam & 0xFFFF), (short)(((long)m.LParam >> 16) & 0xFFFF)));
+                if (Hit(p) < 0 || p.Y < Theme.S(4) && Hit(p) < 100) { m.Result = (IntPtr)HTTRANSPARENT; return; }
+            }
+            base.WndProc(ref m);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = Hit(e.Location);
+            Cursor = h >= 0 && h < 100 ? Cursors.Hand : Cursors.Default;
+            if (h != hoverItem) { hoverItem = h; Invalidate(); }
+        }
+
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hoverItem != -1) { hoverItem = -1; Invalidate(); } }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left) return;
+            int h = Hit(e.Location);
+            var form = FindForm();
+            if (h >= 0 && h < items.Count) items[h].Value();
+            else if (form == null) return;
+            else if (h == 100) form.WindowState = FormWindowState.Minimized;
+            else if (h == 101) form.WindowState = form.WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized;
+            else if (h == 102) form.Close();
+        }
+    }
+
     /// <summary>Full-window BG overlay with spinner, status text, a MUTED detail line and an optional Cancel.</summary>
     internal sealed class BusyOverlay : Control
     {
@@ -725,17 +864,14 @@ namespace DiskSpaceAnalyzer
     /// <summary>Dark menus and popup lists: SURFACE fill, hovered row BORDER, disabled DISABLED_FG.</summary>
     internal sealed class DarkRenderer : ToolStripRenderer
     {
-        /// <summary>True for the window's menu bar: bg background, no outline. False for popup menus (surface + outline).</summary>
-        public bool Bar;
-
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
-            using (var b = new SolidBrush(Bar ? Theme.BG : Theme.SURFACE)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+            using (var b = new SolidBrush(Theme.SURFACE)) e.Graphics.FillRectangle(b, e.AffectedBounds);
         }
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
-            if (Bar || Theme.HasDwmCorners) return;
+            if (Theme.HasDwmCorners) return;
             var r = new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
             using (var p = new Pen(Theme.BORDER)) e.Graphics.DrawRectangle(p, r);
         }
@@ -745,9 +881,7 @@ namespace DiskSpaceAnalyzer
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
         {
             if (!e.Item.Selected || !e.Item.Enabled) return;
-            var r = Bar
-                ? new Rectangle(0, Theme.S(2), e.Item.Width, e.Item.Height - Theme.S(4))
-                : new Rectangle(Theme.S(2), 0, e.Item.Width - Theme.S(4), e.Item.Height);
+            var r = new Rectangle(Theme.S(2), 0, e.Item.Width - Theme.S(4), e.Item.Height);
             Theme.FillRound(e.Graphics, r, Theme.S(6), Theme.BORDER, Theme.BORDER);
         }
 

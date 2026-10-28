@@ -4,7 +4,7 @@
 
 <h1 align="center">Disk Space Analyzer</h1>
 
-<p align="center">A <b>free, open-source, fast</b> disk space analyzer and cleaner for Windows.</p>
+<p align="center">A <b>free, open-source, fast</b> disk space analyzer and cleaner for Windows and macOS.</p>
 
 It starts analyzing your system drive the moment it opens. See exactly where
 your space went in a size tree, a contents list and a pie chart, then
@@ -49,7 +49,7 @@ single-file GUI.
 - **Correct and safe:** follows nothing through junctions/symlinks (their targets
   are never scanned or deleted), supports paths longer than 260 characters, and
   clears read-only attributes so deletes don't get stuck.
-- Menu bar with **About** (version and author, <kbd>F1</kbd>) and **Check for updates**.
+- **About** (version and author, <kbd>F1</kbd>) and **Check for updates** in the title bar, next to the app name.
 - **Rescan folder**, **Show in Explorer**, **Copy path**, drag-and-drop a
   folder onto the window, and an optional **Run as administrator** relaunch for
   protected folders.
@@ -60,8 +60,22 @@ single-file GUI.
 
 ## Download
 
-Grab `DiskSpaceAnalyzer.exe` from the [Releases](../../releases) page and run it.
-Nothing to install.
+Grab `DiskSpaceAnalyzer.exe` (Windows) or `DiskSpaceAnalyzer-macOS.dmg` (macOS) from the
+[Releases](../../releases) page. Nothing to install on Windows: just run the exe.
+
+### macOS
+
+Download `DiskSpaceAnalyzer-macOS.dmg` from the same release, open it and drag
+**Disk Space Analyzer** into **Applications**. It runs natively on Apple
+Silicon (M series) and Intel Macs (macOS 11 or later) and is about 1 MB.
+
+The app is not signed with an Apple Developer ID, so the first time macOS
+blocks it: right-click the app and choose **Open**, then **Open** again (or go to
+**System Settings > Privacy & Security** and click **Open Anyway**). To let it
+read every folder, give it **Full Disk Access** (the button in the toolbar opens
+that setting). It scans the startup disk when it opens; external drives are
+listed and scanned when you select them and press **Scan**. **About** and
+**Check for Updates** are in the app menu next to the Apple menu.
 
 ### Updates
 
@@ -70,7 +84,7 @@ stays silent if there is none, or if you are offline). When one exists, a
 banner offers **Update now**, **What's new** (the release page) and **Later**.
 **Update now** downloads the new `.exe`, checks it against the checksum GitHub
 publishes for the release, puts it in place of the running one and offers
-**Restart now**. To check by hand, click **Check for updates** in the menu bar, or the version number at the bottom right.
+**Restart now**. To check by hand, click **Check for updates** in the title bar, or the version number at the bottom right.
 If the app's folder can't be written to (for example inside Program Files),
 the banner links to the download page instead.
 
@@ -102,6 +116,16 @@ cd DiskSpaceAnalyzer
 
 The build moves `DiskSpaceAnalyzer.exe` to the repository root and removes the
 intermediate `bin\` folder (close a running copy first).
+
+macOS (needs Xcode or the Command Line Tools, and python3):
+
+```bash
+bash macos/build.sh
+```
+
+This builds a universal `Disk Space Analyzer.app` (Apple Silicon + Intel) and packs it into
+`DiskSpaceAnalyzer-macOS.dmg` in the repository root. Both apps take their version from
+`src/Program.cs` and their colours (logo included) from `src/Theme.cs`.
 
 ### Headless scan (for scripting / verification)
 
