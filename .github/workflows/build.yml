@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'dev/**' ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
@@ -39,3 +39,48 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: DiskSpaceAnalyzer.exe
+
+  macos:
+    # Runs after the Windows job, so on a tag both attach their files to the same release.
+    needs: build
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal app and dmg
+        run: bash macos/build.sh
+
+      - name: Headless self-check
+        run: |
+          BIN="macos/build/Disk Space Analyzer.app/Contents/MacOS/DiskSpaceAnalyzer"
+          lipo -archs "$BIN"
+          out=$("$BIN" --cli scan /usr/share)
+          echo "$out"
+          echo "$out" | grep -q 'bytes'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "macos/build/Disk Space Analyzer.app/Contents/Info.plist"
+
+      - name: Window screenshots
+        continue-on-error: true
+        run: |
+          BIN="macos/build/Disk Space Analyzer.app/Contents/MacOS/DiskSpaceAnalyzer"
+          "$BIN" --cli screenshot "$RUNNER_TEMP/shots" /Applications &
+          pid=$!
+          for i in $(seq 1 120); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/shots" || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiskSpaceAnalyzer-macOS
+          path: |
+            DiskSpaceAnalyzer-macOS.dmg
+            ${{ runner.temp }}/shots/*.png
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DiskSpaceAnalyzer-macOS.dmg

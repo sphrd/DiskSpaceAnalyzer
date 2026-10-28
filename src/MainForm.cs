@@ -52,8 +52,8 @@ namespace DiskSpaceAnalyzer
 
         readonly PathInput pathBox;
         readonly Label pathLabel;
-        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin, btnHelp;
-        readonly ContextMenuStrip helpMenu;
+        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
+        readonly MenuStrip menuBar;
         readonly Panel toolbar;
         readonly SplitContainer split, split2;
         readonly PieChart chart;
@@ -87,7 +87,7 @@ namespace DiskSpaceAnalyzer
             Location = new Point(wa.X + (wa.Width - Width) / 2, wa.Y + (wa.Height - Height) / 2);
             KeyPreview = true;
             AllowDrop = true;
-            Padding = new Padding(S(15), S(10), S(15), 0);
+            Padding = new Padding(S(15), 0, S(15), 0);   // the menu bar on top brings its own spacing
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
             // Toolbar: path row, then the actions that work on the selection
@@ -108,20 +108,9 @@ namespace DiskSpaceAnalyzer
             btnExplorer = Btn("Show in Explorer", ButtonKind.Secondary, "Open the selected item in Windows Explorer", ShowInExplorer);
             btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
 
-            // Help menu: check for updates, about.
-            helpMenu = new ContextMenuStrip
-            {
-                Renderer = new DarkRenderer(), BackColor = Theme.SURFACE, ForeColor = Theme.FG, Font = Theme.FONT,
-                ShowImageMargin = false, Padding = new Padding(0, S(4), 0, S(4)), DropShadowEnabled = !Theme.HasDwmCorners
-            };
-            helpMenu.Items.Add(new ToolStripMenuItem("Check for updates", null, (s, e) => updateBanner.Check(true)) { ForeColor = Theme.FG });
-            helpMenu.Items.Add(new ToolStripSeparator());
-            helpMenu.Items.Add(new ToolStripMenuItem("About Disk Space Analyzer", null, (s, e) => ShowAbout()) { ForeColor = Theme.FG, ShortcutKeyDisplayString = "F1" });
-            helpMenu.Opened += (s, e) => Theme.RoundPopup(helpMenu.Handle);
-            btnHelp = Btn("Help", ButtonKind.Secondary, "Check for updates, About (F1)", () => helpMenu.Show(btnHelp, new Point(btnHelp.Width - helpMenu.PreferredSize.Width, btnHelp.Height + S(2))));
 
             toolbar = new Panel { Dock = DockStyle.Top, BackColor = Theme.BG };
-            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete, btnHelp });
+            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete });
             toolbar.Layout += (s, e) => LayoutToolbar();
 
             // Context menu
@@ -279,10 +268,21 @@ namespace DiskSpaceAnalyzer
                 scanner.Cancel();
                 scanBar.CancelButton.Enabled = false;
             };
+            // Menu bar at the very top: two direct actions (no drop-downs).
+            menuBar = new MenuStrip
+            {
+                Dock = DockStyle.Top, Renderer = new DarkRenderer { Bar = true }, BackColor = Theme.BG, ForeColor = Theme.FG,
+                Font = Theme.FONT_9, GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(0, S(2), 0, S(6))
+            };
+            menuBar.Items.Add(new ToolStripMenuItem("About", null, (s, e) => ShowAbout()) { ForeColor = Theme.FG, ToolTipText = "About Disk Space Analyzer (F1)" });
+            menuBar.Items.Add(new ToolStripMenuItem("Check for updates", null, (s, e) => updateBanner.Check(true)) { ForeColor = Theme.FG });
+            MainMenuStrip = menuBar;
+
             Controls.Add(split);
             Controls.Add(scanBar);
             Controls.Add(updateBanner);
             Controls.Add(toolbar);
+            Controls.Add(menuBar);
             Controls.Add(status);
             Controls.Add(overlay);
             // The overlay covers the whole client area (toolbar and status line too), so it is anchored, not docked.
@@ -368,9 +368,6 @@ namespace DiskSpaceAnalyzer
                 b.Bounds = new Rectangle(x, y, p.Width, h);
                 x += p.Width + gap;
             }
-            // Help menu at the right end of the second row, under "Run as administrator".
-            var hp = btnHelp.GetPreferredSize(Size.Empty);
-            btnHelp.Bounds = new Rectangle(w - hp.Width, y, hp.Width, h);
             int total = y + h + S(10);
             if (toolbar.Height != total) toolbar.Height = total;
         }

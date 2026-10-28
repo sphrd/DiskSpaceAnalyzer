@@ -1,4 +1,5 @@
-# Generates assets\app.ico (16-256 px, PNG-compressed), assets\app.png (256 px) and assets\social-preview.png.
+# Generates assets\app.ico (16-256 px, PNG-compressed), assets\app.png (256 px), assets\app-1024.png (source of the
+# macOS .icns, built by macos/build.sh) and assets\social-preview.png.
 # The logo is only the pie chart shaped like Pac-Man facing left, on a transparent background (no tile): one circle
 # split by colour into an upper-left section, a right half and a lower-left section, mouth on the left.
 # Drawn at 4x and downscaled.
@@ -69,6 +70,9 @@ foreach ($s in $sizes) {
     $pngs += , (Get-PngBytes $bmp)
     $bmp.Dispose()
 }
+
+$big = New-IconBitmap 1024
+$big.Save((Join-Path $assets 'app-1024.png'), [System.Drawing.Imaging.ImageFormat]::Png); $big.Dispose()
 
 $out = Join-Path $assets 'app.ico'
 $fs = [System.IO.File]::Create($out)

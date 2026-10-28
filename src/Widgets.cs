@@ -725,14 +725,17 @@ namespace DiskSpaceAnalyzer
     /// <summary>Dark menus and popup lists: SURFACE fill, hovered row BORDER, disabled DISABLED_FG.</summary>
     internal sealed class DarkRenderer : ToolStripRenderer
     {
+        /// <summary>True for the window's menu bar: bg background, no outline. False for popup menus (surface + outline).</summary>
+        public bool Bar;
+
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
-            using (var b = new SolidBrush(Theme.SURFACE)) e.Graphics.FillRectangle(b, e.AffectedBounds);
+            using (var b = new SolidBrush(Bar ? Theme.BG : Theme.SURFACE)) e.Graphics.FillRectangle(b, e.AffectedBounds);
         }
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
-            if (Theme.HasDwmCorners) return;
+            if (Bar || Theme.HasDwmCorners) return;
             var r = new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
             using (var p = new Pen(Theme.BORDER)) e.Graphics.DrawRectangle(p, r);
         }
@@ -742,7 +745,9 @@ namespace DiskSpaceAnalyzer
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
         {
             if (!e.Item.Selected || !e.Item.Enabled) return;
-            var r = new Rectangle(Theme.S(2), 0, e.Item.Width - Theme.S(4), e.Item.Height);
+            var r = Bar
+                ? new Rectangle(0, Theme.S(2), e.Item.Width, e.Item.Height - Theme.S(4))
+                : new Rectangle(Theme.S(2), 0, e.Item.Width - Theme.S(4), e.Item.Height);
             Theme.FillRound(e.Graphics, r, Theme.S(6), Theme.BORDER, Theme.BORDER);
         }
 

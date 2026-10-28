@@ -87,6 +87,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
   to prompt them and take them to the download page. and then download and replace current version."
 - 2026-10-28: "also add about, and check for updates menu to the app. about shows version and author as sphrd. after that
   commit and push all, replace the release."
+- 2026-10-28: "do the macos dmg. but before that, why did you put the about and update in the help button? make it a menu bar
+  item on the top. make two buttons About, Check for updates. Also update the design language and choices into the App
+  design agent file on github."
 - 2026-10-28: "reduce the default app size. it doesnt fit in my screen." (1920x1080 at 125 %: 1500x880 became
   1875x995 px and `CenterScreen` pushed it below the taskbar.)
 
@@ -141,9 +144,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - **Updates:** 3 s after start the app asks `api.github.com/repos/sphrd/DiskSpaceAnalyzer/releases/latest` (no token;
   drafts and pre-releases are never offered). If the tag (`vX.Y.Z`) is newer than the exe's `AssemblyVersion`, an
   attention banner (warn tokens, §2.4) offers Update now / What's new / Later; automatic checks are silent otherwise.
-  Manual check: Help > Check for updates, the About window's button, or the version label at the bottom right.
-- Help button (secondary, right end of the toolbar's second row, under Run as administrator) opens a dark menu: Check
-  for updates, About Disk Space Analyzer (F1). The logo drawing lives in `Theme.DrawLogo` (chart pane + About). Update now: download `DiskSpaceAnalyzer.exe` to
+  Manual check: Check for updates in the menu bar, the About window's button, or the version label at the bottom right.
+- Menu bar at the very top of the window (`MenuStrip` with `DarkRenderer { Bar = true }`: `bg` background, no outline,
+  hovered item `border` rounded): two direct items, **About** (F1) and **Check for updates**, no drop-downs. Replaced a
+  "Help" button in the toolbar on the user's request. The logo drawing lives in `Theme.DrawLogo` (chart pane + About). Update now: download `DiskSpaceAnalyzer.exe` to
   `<exe>.download` with progress and Cancel, check its size and the SHA-256 `digest` GitHub reports for the asset,
   rename the running exe to `<exe>.old` (Windows allows renaming a running exe), move the download into place, then
   Restart now. The next start deletes `.old` / `.download`, retrying for ~15 s because the previous process may still

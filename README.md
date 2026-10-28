@@ -49,7 +49,7 @@ single-file GUI.
 - **Correct and safe:** follows nothing through junctions/symlinks (their targets
   are never scanned or deleted), supports paths longer than 260 characters, and
   clears read-only attributes so deletes don't get stuck.
-- **Help** menu with **Check for updates** and **About** (version and author, <kbd>F1</kbd>).
+- Menu bar with **About** (version and author, <kbd>F1</kbd>) and **Check for updates**.
 - **Rescan folder**, **Show in Explorer**, **Copy path**, drag-and-drop a
   folder onto the window, and an optional **Run as administrator** relaunch for
   protected folders.
@@ -70,7 +70,7 @@ stays silent if there is none, or if you are offline). When one exists, a
 banner offers **Update now**, **What's new** (the release page) and **Later**.
 **Update now** downloads the new `.exe`, checks it against the checksum GitHub
 publishes for the release, puts it in place of the running one and offers
-**Restart now**. To check by hand, use **Help > Check for updates** or click the version number at the bottom right.
+**Restart now**. To check by hand, click **Check for updates** in the menu bar, or the version number at the bottom right.
 If the app's folder can't be written to (for example inside Program Files),
 the banner links to the download page instead.
 
