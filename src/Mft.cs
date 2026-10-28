@@ -42,11 +42,19 @@ namespace DiskSpaceAnalyzer
 
         public static DirNode TryScan(string path, Scanner progress)
         {
-            if (!IsDriveRoot(path)) return null;
+            if (!IsDriveRoot(path)) { progress.MftNote = "not a drive root"; return null; }
             IntPtr h = CreateFileW(@"\\.\" + path.Substring(0, 2), GENERIC_READ, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
-            if (h == new IntPtr(-1)) return null;
-            try { return new Reader(h, path, progress).Run(); }
-            catch (Exception) { return null; }
+            if (h == new IntPtr(-1)) { progress.MftNote = "cannot open the volume (error " + Marshal.GetLastWin32Error() + "; needs administrator rights)"; return null; }
+            try
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var reader = new Reader(h, path, progress);
+                var root = reader.Run();
+                progress.MftNote = root != null ? string.Format("read {0:N0} records in {1:0.00} s, built the tree in {2:0.00} s", reader.RecordCount, reader.ReadSeconds, sw.Elapsed.TotalSeconds - reader.ReadSeconds)
+                    : "not used: " + reader.Why;
+                return root;
+            }
+            catch (Exception ex) { progress.MftNote = "failed: " + ex.Message; return null; }
             finally { CloseHandle(h); }
         }
 
@@ -68,6 +76,9 @@ namespace DiskSpaceAnalyzer
             string[] name;
             byte[] nameNs;
             readonly List<Link> extraLinks = new List<Link>();
+            public string Why = "";
+            public double ReadSeconds;
+            public long RecordCount { get { return recordCount; } }
 
             public Reader(IntPtr h, string rootPath, Scanner progress)
             {
@@ -93,12 +104,12 @@ namespace DiskSpaceAnalyzer
             {
                 byte* vd = stackalloc byte[256];
                 int ret;
-                if (!DeviceIoControl(h, FSCTL_GET_NTFS_VOLUME_DATA, IntPtr.Zero, 0, vd, 256, out ret, IntPtr.Zero)) return null;
+                if (!DeviceIoControl(h, FSCTL_GET_NTFS_VOLUME_DATA, IntPtr.Zero, 0, vd, 256, out ret, IntPtr.Zero)) { Why = "not NTFS"; return null; }
                 bytesPerCluster = *(uint*)(vd + 44);
                 recordSize = *(uint*)(vd + 48);
                 long mftValid = *(long*)(vd + 56);
                 long mftLcn = *(long*)(vd + 64);
-                if (bytesPerCluster == 0 || recordSize < 512 || recordSize > 65536) return null;
+                if (bytesPerCluster == 0 || recordSize < 512 || recordSize > 65536) { Why = "unexpected volume data"; return null; }
 
                 // Record 0 describes the MFT itself: where its data runs are on the disk.
                 var runs = new List<KeyValuePair<long, long>>();
@@ -106,12 +117,12 @@ namespace DiskSpaceAnalyzer
                 fixed (byte* p = rec0)
                 {
                     Read(mftLcn * bytesPerCluster, p, rec0.Length);
-                    if (*(uint*)p != 0x454C4946 || !Fixup(p, recordSize)) return null;
-                    if (!MftRuns(p, runs)) return null;
+                    if (*(uint*)p != 0x454C4946 || !Fixup(p, recordSize)) { Why = "record 0 unreadable"; return null; }
+                    if (!MftRuns(p, runs)) { Why = "the table's own layout is spread over several records"; return null; }
                 }
 
                 recordCount = mftValid / recordSize;
-                if (recordCount <= RootRecord || recordCount > int.MaxValue) return null;
+                if (recordCount <= RootRecord || recordCount > int.MaxValue) { Why = "unexpected table size"; return null; }
                 int n = (int)recordCount;
                 flags = new byte[n];
                 bytes = new long[n];
@@ -143,7 +154,8 @@ namespace DiskSpaceAnalyzer
                         }
                     }
                 }
-                if (progress.Cancelled) return null;
+                if (progress.Cancelled) { Why = "cancelled"; return null; }
+                ReadSeconds = progress.Elapsed;
                 return Build();
             }
 

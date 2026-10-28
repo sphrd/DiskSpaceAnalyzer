@@ -18,13 +18,19 @@ namespace DiskSpaceAnalyzer
         static int Main(string[] args)
         {
             // Headless mode: DiskSpaceAnalyzer.exe --cli scan <folder>  (--scan <folder> is kept as an alias)
-            if (args.Length >= 1 && args[0] == "--cli") return Headless(args);
+            if (args.Length >= 1 && args[0] == "--cli" && !(args.Length == 4 && args[1] == "screenshot")) return Headless(args);
             if (args.Length == 2 && args[0] == "--scan") return Headless(new[] { "--cli", "scan", args[1] });
 
             try { SetCurrentProcessExplicitAppUserModelID("sphrd.DiskSpaceAnalyzer"); } catch (Exception) { }
             Updater.CleanUp();   // the exe replaced by the last update, if any
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            // Screenshots of every view (for checks and documentation): DiskSpaceAnalyzer.exe --cli screenshot <out folder> <path to scan>
+            if (args.Length == 4 && args[0] == "--cli" && args[1] == "screenshot")
+            {
+                Application.Run(new MainForm(args[3]) { ShotDir = System.IO.Path.GetFullPath(args[2]) });
+                return 0;
+            }
             try { Application.Run(new MainForm(args.Length > 0 ? args[0] : null)); }
             catch (Exception ex)
             {
@@ -66,6 +72,7 @@ namespace DiskSpaceAnalyzer
             Console.WriteLine();
             Console.WriteLine("{0}\t{1} bytes\t{2} on disk\t{3} files\t{4} dirs\t{5:0.000} s\t{6}", root.Name, root.Bytes, root.Alloc, root.Files, root.Dirs,
                 sw.Elapsed.TotalSeconds, s.Method);
+            if (mft) Console.WriteLine("master file table: " + s.MftNote);
             if (root.Children != null)
                 foreach (var c in root.Children)
                     Console.WriteLine("  {0,-40} {1,18:N0} bytes {2,18:N0} on disk {3,10:N0} files", c.Name, c.Bytes, c.Alloc, c.Files);

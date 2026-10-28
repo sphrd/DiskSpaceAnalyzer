@@ -144,7 +144,7 @@ namespace DiskSpaceAnalyzer
             foreach (var c in dir.Children)
             {
                 float s = (float)(sweep * (double)c.Size / dir.Size);
-                if (s < 0.8f) break;   // children are sorted by size: the rest are smaller still
+                if (s < 1.5f) break;   // children are sorted by size: the rest are smaller still
                 var color = Blend(baseColor, BackColor, (level == 1 ? 0.28f : 0.5f) + (k++ % 2 == 0 ? 0f : 0.12f));
                 arcs.Add(new ChartArc { Start = a, Sweep = s, Level = level, Owner = owner, Color = color, Dir = c, ParentSize = dir.Size });
                 AddArcs(c, a, s, level + 1, owner, baseColor);

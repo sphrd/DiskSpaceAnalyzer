@@ -297,17 +297,20 @@ namespace DiskSpaceAnalyzer
             Shown += (s, e) =>
             {
                 // Tree and chart keep their preferred widths but give way on narrow windows, so the list stays usable.
-                split.SplitterDistance = Math.Min(S(430), split.Width * 30 / 100);
-                split2.SplitterDistance = Math.Max(S(200), split2.Width - Math.Min(S(330), split2.Width * 38 / 100) - split2.SplitterWidth);
+                split.SplitterDistance = Math.Min(S(420), split.Width * 29 / 100);
+                split2.SplitterDistance = Math.Max(S(200), split2.Width - Math.Min(S(300), split2.Width * 34 / 100) - split2.SplitterWidth);
                 LoadDrives();
                 RefreshTree(null);
                 // The system drive is analyzed automatically; other drives are listed and scanned on demand.
                 if (!string.IsNullOrEmpty(initialPath)) ScanPath(initialPath);
                 else ScanPath(Path.GetPathRoot(Environment.SystemDirectory));
                 // Look for a newer release in the background; silent unless there is one.
-                var later = new System.Windows.Forms.Timer { Interval = 3000 };
-                later.Tick += (s2, e2) => { later.Dispose(); updates.Check(false); };
-                later.Start();
+                if (ShotDir == null)
+                {
+                    var later = new System.Windows.Forms.Timer { Interval = 3000 };
+                    later.Tick += (s2, e2) => { later.Dispose(); updates.Check(false); };
+                    later.Start();
+                }
             };
             FormClosing += (s, e) => { if (scanner != null) scanner.Cancel(); };
             UpdateButtons();
@@ -524,6 +527,7 @@ namespace DiskSpaceAnalyzer
             statusLabel.Text = string.Format("{0}: {1} in {2:N0} files and {3:N0} folders - scanned in {4:0.00} s, {5}{6}",
                 result.Name, Fmt.Size(result.Size), result.Files, result.Dirs, sw.Elapsed.TotalSeconds, s.Method,
                 s.Cancelled ? "  (stopped - partial results)" : "");
+            if (ShotDir != null && !shotsStarted) { shotsStarted = true; RunShots(); }
         }
 
         /// <summary>Deepest scanned folder under root that matches fullPath (root itself if nothing deeper matches).</summary>

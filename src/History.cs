@@ -125,7 +125,7 @@ namespace DiskSpaceAnalyzer
         Page BuildChangesPage()
         {
             var list = NewList(new[] { "Folder", "Change", "Now", "Before" },
-                new[] { "name", "change", "size", "files" }, new[] { 520, 110, 100, 100 }, -1);
+                new[] { "name", "change", "size", "files" }, new[] { 380, 100, 90, 90 }, -1);
             var p = AddPage("Changes", list, null);
             p.ChartTitle = "Growth";
             p.ChartScope = "of the growth";

@@ -106,6 +106,18 @@ namespace DiskSpaceAnalyzer
                 BackColor = Theme.SURFACE, Height = Theme.FONT_9.Height + S(10), TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(S(4), 0, 0, 0)
             };
+            // One line, or two when the text needs it (then it wraps; anything longer ends in an ellipsis).
+            var cap = p.Caption;
+            EventHandler fit = (s, e) =>
+            {
+                int w = Math.Max(10, cap.ClientSize.Width - cap.Padding.Horizontal);
+                int th = TextRenderer.MeasureText(cap.Text, cap.Font, new Size(w, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix).Height;
+                int lines = th > cap.Font.Height * 1.5 ? 2 : 1;
+                int hgt = cap.Font.Height * lines + S(10);
+                if (cap.Height != hgt) cap.Height = hgt;
+            };
+            cap.TextChanged += fit;
+            cap.SizeChanged += fit;
             p.Root.Controls.Add(new ScrollHost(list) { Dock = DockStyle.Fill });
             p.Root.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(4), BackColor = Theme.SURFACE });
             if (bar != null) p.Root.Controls.Add(bar);
@@ -129,42 +141,65 @@ namespace DiskSpaceAnalyzer
             return p;
         }
 
-        /// <summary>A row of filter or action controls above a list; controls tagged "right" sit at the right end.</summary>
+        /// <summary>
+        /// A row of filter or action controls above a list; controls tagged "right" sit at the right end. When the pane is
+        /// too narrow the controls wrap onto further rows; a search box takes the spare width of its row.
+        /// </summary>
         Panel MakeBar(params Control[] items)
         {
             var bar = new Panel { Dock = DockStyle.Top, BackColor = Theme.SURFACE };
             bar.Controls.AddRange(items);
             bar.Layout += (s, e) =>
             {
-                int gap = S(6), h = 0;
-                foreach (Control c in bar.Controls) h = Math.Max(h, c.GetPreferredSize(Size.Empty).Height);
-                if (h == 0) h = Theme.FONT.Height + S(12);
-                var search = items.OfType<SearchBox>().FirstOrDefault();
-                if (search != null) h = Math.Max(h, search.PreferredHeight);
-                int x = 0, right = bar.ClientSize.Width;
-                foreach (var c in items.Reverse())
+                int gap = S(6), W = Math.Max(S(100), bar.ClientSize.Width), h = Theme.FONT.Height + S(12);
+                foreach (var c in items) h = Math.Max(h, c is SearchBox ? ((SearchBox)c).PreferredHeight : c.GetPreferredSize(Size.Empty).Height);
+                Func<Control, int> pref = c => c is SearchBox ? S(220) : c.GetPreferredSize(Size.Empty).Width;
+                var rows = new List<List<Control>> { new List<Control>() };
+                int x = 0;
+                var leftItems = items.Where(c => c.Visible && !"right".Equals(c.Tag)).ToList();
+                bool oneRow = leftItems.Sum(c => pref(c) + gap) + items.Where(c => c.Visible && "right".Equals(c.Tag)).Sum(c => pref(c) + gap) <= W;
+                foreach (var c in leftItems)
                 {
-                    if (!c.Visible || !"right".Equals(c.Tag)) continue;
-                    int w = c.GetPreferredSize(Size.Empty).Width;
-                    right -= w;
-                    c.Bounds = new Rectangle(right, 0, w, h);
-                    right -= gap;
-                }
-                int fixedW = 0;
-                foreach (var c in items) if (c.Visible && !(c is SearchBox) && !"right".Equals(c.Tag)) fixedW += c.GetPreferredSize(Size.Empty).Width + gap;
-                foreach (var c in items)
-                {
-                    if (!c.Visible || "right".Equals(c.Tag)) continue;
-                    int w = c is SearchBox ? Math.Max(S(160), right - x - fixedW) : c.GetPreferredSize(Size.Empty).Width;
-                    if (c is Label) c.Bounds = new Rectangle(x, (h - c.PreferredSize.Height) / 2, w, c.PreferredSize.Height);
-                    else c.Bounds = new Rectangle(x, 0, w, h);
+                    // When the bar wraps, a search box gets the first row to itself.
+                    if (!oneRow && c is SearchBox && rows[0].Count == 0) { rows[0].Add(c); rows.Add(new List<Control>()); x = 0; continue; }
+                    int w = pref(c);
+                    if (rows[rows.Count - 1].Count > 0 && x + w > W) { rows.Add(new List<Control>()); x = 0; }
+                    rows[rows.Count - 1].Add(c);
                     x += w + gap;
                 }
-                if (bar.Height != h + S(4)) bar.Height = h + S(4);
+                var right = items.Where(c => c.Visible && "right".Equals(c.Tag)).ToList();
+                int rightW = right.Sum(c => pref(c) + gap) - (right.Count > 0 ? gap : 0);
+                bool rightOwnRow = right.Count > 0 && rows[rows.Count - 1].Count > 0 && x + rightW > W;
+                int y = 0;
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    var row = rows[i];
+                    int avail = W - (i == rows.Count - 1 && right.Count > 0 && !rightOwnRow ? rightW + S(16) : 0);
+                    int used = row.Sum(c => pref(c) + gap) - (row.Count > 0 ? gap : 0);
+                    int extra = Math.Max(0, avail - used);
+                    x = 0;
+                    foreach (var c in row)
+                    {
+                        int w = pref(c) + (c is SearchBox ? extra : 0);
+                        if (c is Label) c.Bounds = new Rectangle(x, y + (h - c.PreferredSize.Height) / 2, w, c.PreferredSize.Height);
+                        else c.Bounds = new Rectangle(x, y, w, h);
+                        x += w + gap;
+                    }
+                    if (i < rows.Count - 1 || rightOwnRow) y += h + gap;
+                }
+                x = W;
+                for (int i = right.Count - 1; i >= 0; i--)
+                {
+                    int w = pref(right[i]);
+                    x -= w;
+                    right[i].Bounds = new Rectangle(Math.Max(0, x), y, w, h);
+                    x -= gap;
+                }
+                int total = y + h + S(4);
+                if (bar.Height != total) bar.Height = total;
             };
             return bar;
         }
-
         void ShowPage()
         {
             var p = ActivePage;

@@ -20,6 +20,10 @@ namespace DiskSpaceAnalyzer
         public string RootPath;
         /// <summary>How the last scan was done, for the status line.</summary>
         public string Method = "folder by folder";
+        /// <summary>Why the master file table was or was not used (for the command line and diagnostics).</summary>
+        public string MftNote = "";
+        readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        public double Elapsed { get { return clock.Elapsed.TotalSeconds; } }
 
         readonly BlockingCollection<DirNode> queue = new BlockingCollection<DirNode>(new ConcurrentStack<DirNode>());
         volatile bool cancel, finished;
