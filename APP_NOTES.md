@@ -314,3 +314,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
   filters, File types, Duplicates, Suggestions, Changes, Delete list with Recycle Bin), multi-ring chart, export to HTML/CSV,
   live updates, self-test and screenshot modes. macOS has the same views (no master file table; Trash instead of the
   Recycle Bin; FSEvents; iCloud dataless files count 0 on disk; shortcuts ⇧⌘D add to delete list, ⌘F search, ⇧⌘E export).
+- v1.7.1 (2026-10-28): fix a crash in live updates on paths longer than 260 characters; About shows the speed tip and
+  the keyboard shortcuts; scan history keeps only the last scan of the 10 most recent drives/folders.
