@@ -34,17 +34,27 @@ namespace DiskSpaceAnalyzer
         }
     }
 
-    /// <summary>One row in a list view: either a folder (Dir) or a file (File).</summary>
+    /// <summary>
+    /// One row in a list view: a folder (Dir), a file (File), a cleanup target (Targets, e.g. a suggestion or a delete-list
+    /// entry), a group head (duplicates) or a plain summary row (file types, "N smaller files").
+    /// </summary>
     internal sealed class ItemInfo
     {
-        public bool IsDir, IsSummary;
+        public bool IsDir, IsSummary, IsGroup, FolderIcon;
         public DirNode Dir;
         public FileEntry File;
-        public string Name, Folder;
+        public List<DeleteTarget> Targets;
+        public ItemInfo GroupOf;              // member of a group: shares the group's chart slice
+        public string Name, Folder, Path, Ext, Category, Note;
         public long Size, Files, Dirs, Modified;
+        public long Change = long.MinValue;   // compared with the previous scan; MinValue = unknown
+        public long ChartValue = -1;          // size used by the chart when it differs from Size
         public double Percent;
 
-        public string FullPath { get { return IsDir ? Dir.FullPath : File.FullPath; } }
+        public long ChartSize { get { return ChartValue >= 0 ? ChartValue : Size; } }
+        public bool CanDelete { get { return !IsSummary && !IsGroup && (IsDir || File != null || Targets != null); } }
+
+        public string FullPath { get { return IsDir ? Dir.FullPath : File != null ? File.FullPath : Path; } }
 
         public static ItemInfo ForDir(DirNode d, long parentSize)
         {
@@ -86,6 +96,9 @@ namespace DiskSpaceAnalyzer
                 case "files": r = a.Files.CompareTo(b.Files); break;
                 case "dirs": r = a.Dirs.CompareTo(b.Dirs); break;
                 case "mod": r = a.Modified.CompareTo(b.Modified); break;
+                case "change": r = a.Change.CompareTo(b.Change); break;
+                case "cat": r = string.Compare(a.Category, b.Category, StringComparison.OrdinalIgnoreCase); break;
+                case "note": r = string.Compare(a.Note, b.Note, StringComparison.OrdinalIgnoreCase); break;
                 default: r = a.Size.CompareTo(b.Size); break;
             }
             if (r == 0 && Key != "size") r = b.Size.CompareTo(a.Size);
@@ -129,7 +142,7 @@ namespace DiskSpaceAnalyzer
             Columns.Clear();
             for (int i = 0; i < titles.Length; i++)
             {
-                bool right = keys[i] == "size" || keys[i] == "files" || keys[i] == "dirs";
+                bool right = keys[i] == "size" || keys[i] == "files" || keys[i] == "dirs" || keys[i] == "change";
                 Columns.Add(titles[i], Theme.S(widths[i]), right ? HorizontalAlignment.Right : HorizontalAlignment.Left);
             }
             UpdateHeaders();
@@ -330,14 +343,15 @@ namespace DiskSpaceAnalyzer
             if (col.Index == 0)
             {
                 int icon = Theme.S(16);
-                if (info != null && !info.IsSummary)
+                if (info != null && info.GroupOf != null) pad += Theme.S(18);
+                if (info != null && !info.IsSummary && !info.IsGroup)
                 {
                     var ir = new Rectangle(r.X + pad, r.Y + (r.Height - icon) / 2, icon, icon);
                     Color ic = strong ? Theme.BG : Theme.MUTED;
-                    if (info.IsDir) Theme.DrawFolder(g, ir, ic); else Theme.DrawFile(g, ir, ic);
+                    if (info.IsDir || info.FolderIcon) Theme.DrawFolder(g, ir, ic); else Theme.DrawFile(g, ir, ic);
                 }
                 var tr = new Rectangle(r.X + pad + icon + Theme.S(6), r.Y, Math.Max(0, r.Width - pad - icon - Theme.S(12)), r.Height);
-                TextRenderer.DrawText(g, text, Font, tr, fore, CellFlags);
+                TextRenderer.DrawText(g, text, info != null && info.IsGroup ? Theme.FONT_BOLD : Font, tr, fore, CellFlags);
                 return;
             }
 

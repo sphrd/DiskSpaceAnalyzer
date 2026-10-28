@@ -306,18 +306,17 @@ namespace DiskSpaceAnalyzer
                     AddFile(lists, dirs, parent[r], new FileRec { Name = name[r], Bytes = bytes[r], Alloc = alloc[r], Modified = modified[r], Attr = attrs[r] });
                 }
                 // Further hard links: same file in another folder; its space on disk is already counted once.
-                var seen = new HashSet<long>();
+                // One entry per (file, folder), preferring the long name over the 8.3 one.
+                var best = new Dictionary<long, Link>();
                 foreach (var l in extraLinks)
                 {
-                    if (flags[l.Record] != 1) continue;
+                    if (flags[l.Record] != 1 || l.Parent == parent[l.Record]) continue;
                     long key = ((long)l.Record << 32) | (uint)l.Parent;
-                    if (l.Parent == parent[l.Record] || !seen.Add(key)) continue;
-                    string nm = l.Name;
-                    if (l.Ns == 2)
-                        foreach (var o in extraLinks)
-                            if (o.Record == l.Record && o.Parent == l.Parent && o.Ns != 2) { nm = o.Name; break; }
-                    AddFile(lists, dirs, l.Parent, new FileRec { Name = nm, Bytes = bytes[l.Record], Alloc = 0, Modified = modified[l.Record], Attr = attrs[l.Record] });
+                    Link cur;
+                    if (!best.TryGetValue(key, out cur) || (cur.Ns == 2 && l.Ns != 2)) best[key] = l;
                 }
+                foreach (var l in best.Values)
+                    AddFile(lists, dirs, l.Parent, new FileRec { Name = l.Name, Bytes = bytes[l.Record], Alloc = 0, Modified = modified[l.Record], Attr = attrs[l.Record] });
 
                 for (int r = 0; r < n; r++)
                 {

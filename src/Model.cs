@@ -236,13 +236,12 @@ namespace DiskSpaceAnalyzer
     {
         public string[] Patterns;       // lower case; '*' and '?' wildcards, otherwise "contains"
         public string Category;         // null = any
-        public string Extension;        // null = any (lower case, without dot)
         public long MinSize;
         public long ModifiedBefore;     // FILETIME; 0 = any
 
         public bool IsEmpty
         {
-            get { return (Patterns == null || Patterns.Length == 0) && Category == null && Extension == null && MinSize <= 0 && ModifiedBefore <= 0; }
+            get { return (Patterns == null || Patterns.Length == 0) && Category == null && MinSize <= 0 && ModifiedBefore <= 0; }
         }
 
         public bool FolderOk(DirNode d) { return true; }
@@ -251,10 +250,9 @@ namespace DiskSpaceAnalyzer
         {
             if (MinSize > 0 && FileIndex.Measure(ref f) < MinSize) return false;
             if (ModifiedBefore > 0 && (f.Modified <= 0 || f.Modified >= ModifiedBefore)) return false;
-            if (Extension != null || Category != null)
+            if (Category != null)
             {
                 string ext = FileIndex.Extension(f.Name);
-                if (Extension != null && ext != Extension) return false;
                 if (Category != null && FileTypes.CategoryOf(ext) != Category) return false;
             }
             if (Patterns != null && Patterns.Length > 0)

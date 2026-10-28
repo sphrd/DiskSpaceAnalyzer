@@ -19,6 +19,17 @@ namespace DiskSpaceAnalyzer
         public readonly List<ListViewItem> Rows = new List<ListViewItem>();
     }
 
+    /// <summary>A section of an outer ring: a subfolder (ring 1) or a sub-subfolder (ring 2) of a folder slice.</summary>
+    internal sealed class ChartArc
+    {
+        public float Start, Sweep;
+        public int Level;            // 1 = first outer ring
+        public int Owner;            // index of the inner slice it belongs to
+        public Color Color;
+        public DirNode Dir;
+        public long ParentSize;
+    }
+
     /// <summary>
     /// Donut chart of one folder or drive. Slices follow the folder contents list row for row (same order);
     /// small consecutive rows are merged into one "smaller items" slice. Drawn from sizes already in memory.
@@ -27,6 +38,9 @@ namespace DiskSpaceAnalyzer
     internal sealed class PieChart : Control
     {
         List<ChartSlice> slices = new List<ChartSlice>();
+        List<ChartArc> arcs = new List<ChartArc>();
+        int rings;               // outer rings shown around the slices (0 = plain donut)
+        int hoverArc = -1;
         long total;
         string title = "", subtitle = "";
         float startAngle = -90;  // where the first slice begins (12 o'clock)
@@ -86,13 +100,27 @@ namespace DiskSpaceAnalyzer
 
         public IList<ChartSlice> Slices { get { return slices; } }
 
-        public void SetData(string title, string subtitle, List<ChartSlice> slices)
+        /// <summary>Shows slices; rings > 0 adds that many outer rings with the subfolders of folder slices (sunburst).</summary>
+        public void SetData(string title, string subtitle, List<ChartSlice> slices, int rings = 0)
         {
             this.title = title ?? "";
             this.subtitle = subtitle ?? "";
             this.slices = slices ?? new List<ChartSlice>();
             total = 0;
             foreach (var s in this.slices) total += Math.Max(0, s.Size);
+            this.rings = rings;
+            hoverArc = -1;
+            arcs = new List<ChartArc>();
+            if (rings > 0 && total > 0)
+            {
+                float a = -90;
+                for (int i = 0; i < this.slices.Count; i++)
+                {
+                    float sweep = (float)(360.0 * Math.Max(0, this.slices[i].Size) / total);
+                    if (this.slices[i].Dir != null) AddArcs(this.slices[i].Dir, a, sweep, 1, i, this.slices[i].Color);
+                    a += sweep;
+                }
+            }
             // Slices run clockwise from 12 o'clock; free space is last, so it ends at the top, left of the vertical line.
             startAngle = -90;
             hover = -1;
@@ -107,6 +135,33 @@ namespace DiskSpaceAnalyzer
             logoMode = false;
             Invalidate();
         }
+
+        void AddArcs(DirNode dir, float start, float sweep, int level, int owner, Color baseColor)
+        {
+            if (level > rings || dir.Children == null || dir.Size <= 0 || sweep < 1f) return;
+            float a = start;
+            int k = 0;
+            foreach (var c in dir.Children)
+            {
+                float s = (float)(sweep * (double)c.Size / dir.Size);
+                if (s < 0.8f) break;   // children are sorted by size: the rest are smaller still
+                var color = Blend(baseColor, BackColor, (level == 1 ? 0.28f : 0.5f) + (k++ % 2 == 0 ? 0f : 0.12f));
+                arcs.Add(new ChartArc { Start = a, Sweep = s, Level = level, Owner = owner, Color = color, Dir = c, ParentSize = dir.Size });
+                AddArcs(c, a, s, level + 1, owner, baseColor);
+                a += s;
+            }
+        }
+
+        static Color Blend(Color a, Color b, float t)
+        {
+            return Color.FromArgb((int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
+        }
+
+        // Ring radii as fractions of the chart radius (with outer rings): hole, inner ring, then one band per outer ring.
+        float HoleRatio { get { return rings > 0 ? 0.48f : 0.58f; } }
+        float InnerOuterRatio { get { return rings > 0 ? 1f - 0.15f * rings : 1f; } }
+        float RingInner(int level) { return InnerOuterRatio + 0.02f + 0.15f * (level - 1); }
+        float RingOuter(int level) { return InnerOuterRatio + 0.15f * level; }
 
         /// <summary>Highlights a slice from outside (the list) without raising HoverChanged.</summary>
         public void SetHover(int index)
@@ -171,6 +226,9 @@ namespace DiskSpaceAnalyzer
             var r = pieRect;
             DrawLogo(g, r, 1 - e);
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            // With outer rings the slices only reach the inner ring's edge; the rings fade in around them.
+            int shrink = (int)(r.Width * (1 - InnerOuterRatio) / 2);
+            var pr = Rectangle.Inflate(r, -shrink, -shrink);
             float reveal = 360f * e, start = startAngle, alpha = Math.Min(1f, anim * 2.5f);
             foreach (var s in slices)
             {
@@ -179,10 +237,20 @@ namespace DiskSpaceAnalyzer
                 float visible = Math.Min(sweep, reveal - (start - startAngle));
                 if (visible <= 0) break;
                 if (!s.Empty)
-                    using (var b = new SolidBrush(Fade(s.Color, alpha))) g.FillPie(b, r, start, Math.Max(0.01f, visible));
+                    using (var b = new SolidBrush(Fade(s.Color, alpha))) g.FillPie(b, pr, start, Math.Max(0.01f, visible));
                 start += sweep;
             }
-            int hole = (int)(r.Width * 0.58 * e);
+            if (rings > 0)
+            {
+                var c0 = new PointF(r.X + r.Width / 2f, r.Y + r.Height / 2f);
+                float R = r.Width / 2f;
+                foreach (var a in arcs)
+                {
+                    float visible = Math.Min(a.Sweep, reveal - (a.Start - startAngle));
+                    if (visible > 0) FillBand(g, c0, R * RingInner(a.Level), R * RingOuter(a.Level), a.Start, visible, Fade(a.Color, alpha * e));
+                }
+            }
+            int hole = (int)(r.Width * HoleRatio * e);
             if (hole > 0)
                 using (var b = new SolidBrush(BackColor))
                     g.FillEllipse(b, r.X + (r.Width - hole) / 2, r.Y + (r.Height - hole) / 2, hole, hole);
@@ -199,17 +267,33 @@ namespace DiskSpaceAnalyzer
             else
             {
                 float start = startAngle;
+                var c0 = new PointF(r.X + r.Width / 2f, r.Y + r.Height / 2f);
+                float R = r.Width / 2f;
                 for (int i = 0; i < slices.Count; i++)
                 {
                     float sweep = (float)(360.0 * slices[i].Size / total);
                     if (sweep <= 0) continue;
                     if (!slices[i].Empty)
                     {
-                        var rr = r;
-                        if (i == hover) rr.Inflate(Theme.S(6), Theme.S(6));
-                        using (var b = new SolidBrush(slices[i].Color)) g.FillPie(b, rr, start, Math.Max(sweep, 0.01f));
+                        if (rings > 0)
+                        {
+                            var col = i == hover && hoverArc < 0 ? Blend(slices[i].Color, Color.White, 0.25f) : slices[i].Color;
+                            FillBand(g, c0, R * HoleRatio, R * InnerOuterRatio, start, Math.Max(sweep, 0.01f), col);
+                        }
+                        else
+                        {
+                            var rr = r;
+                            if (i == hover) rr.Inflate(Theme.S(6), Theme.S(6));
+                            using (var b = new SolidBrush(slices[i].Color)) g.FillPie(b, rr, start, Math.Max(sweep, 0.01f));
+                        }
                     }
                     start += sweep;
+                }
+                for (int i = 0; i < arcs.Count; i++)
+                {
+                    var a = arcs[i];
+                    var col = i == hoverArc ? Blend(a.Color, Color.White, 0.3f) : a.Color;
+                    FillBand(g, c0, R * RingInner(a.Level), R * RingOuter(a.Level), a.Start, a.Sweep, col);
                 }
                 // Thin separators in the panel colour between visible slices.
                 int visible = 0;
@@ -229,13 +313,19 @@ namespace DiskSpaceAnalyzer
                         }
                 }
             }
-            int hole = (int)(r.Width * 0.58);
+            int hole = (int)(r.Width * HoleRatio);
             var hr = new Rectangle(r.X + (r.Width - hole) / 2, r.Y + (r.Height - hole) / 2, hole, hole);
             using (var b = new SolidBrush(BackColor)) g.FillEllipse(b, hr);
             if (total > 0) DrawEmptySlices(g, r, hr);
             // Centre: hovered slice (name, size and share) or the total.
             string l1, l2, l3;
-            if (hover >= 0 && hover < slices.Count) { l1 = slices[hover].Label; l2 = Fmt.Size(slices[hover].Size); l3 = slices[hover].Detail ?? ""; }
+            if (hoverArc >= 0 && hoverArc < arcs.Count)
+            {
+                var a = arcs[hoverArc];
+                l1 = a.Dir.Name; l2 = Fmt.Size(a.Dir.Size);
+                l3 = string.Format("{0:0.0} % of {1}", 100.0 * a.Dir.Size / Math.Max(1, a.ParentSize), a.Dir.Parent != null ? a.Dir.Parent.Name : "parent");
+            }
+            else if (hover >= 0 && hover < slices.Count) { l1 = slices[hover].Label; l2 = Fmt.Size(slices[hover].Size); l3 = slices[hover].Detail ?? ""; }
             else { l1 = "Total"; l2 = Fmt.Size(total); l3 = ""; }
             var inner = Rectangle.Inflate(hr, -Theme.S(14), 0);
             int h1 = Theme.FONT_9.Height, h2 = Theme.FONT_11.Height, h3 = l3.Length > 0 ? Theme.FONT_9.Height : 0;
@@ -269,12 +359,47 @@ namespace DiskSpaceAnalyzer
             }
         }
 
+        static void FillBand(Graphics g, PointF c, float r0, float r1, float start, float sweep, Color color)
+        {
+            if (r1 - r0 < 0.5f) return;
+            using (var path = new GraphicsPath())
+            {
+                path.AddArc(c.X - r1, c.Y - r1, 2 * r1, 2 * r1, start, sweep);
+                path.AddArc(c.X - r0, c.Y - r0, 2 * r0, 2 * r0, start + sweep, -sweep);
+                path.CloseFigure();
+                using (var b = new SolidBrush(color)) g.FillPath(b, path);
+            }
+        }
+
+        /// <summary>Outer-ring section under the point (-1 = none).</summary>
+        int HitArc(Point p)
+        {
+            if (rings == 0 || arcs.Count == 0 || logoMode || Animating) return -1;
+            float cx = pieRect.X + pieRect.Width / 2f, cy = pieRect.Y + pieRect.Height / 2f, R = pieRect.Width / 2f;
+            double dx = p.X - cx, dy = p.Y - cy, dist = Math.Sqrt(dx * dx + dy * dy) / R;
+            if (dist <= InnerOuterRatio || dist > 1.02) return -1;
+            double ang = Math.Atan2(dy, dx) * 180 / Math.PI;
+            for (int i = 0; i < arcs.Count; i++)
+            {
+                var a = arcs[i];
+                if (dist < RingInner(a.Level) - 0.01 || dist > RingOuter(a.Level) + 0.01) continue;
+                double rel = ((ang - a.Start) % 360 + 360) % 360;
+                if (rel <= a.Sweep) return i;
+            }
+            return -1;
+        }
+
         int HitTest(Point p)
         {
             if (total <= 0 || pieRect.Width <= 0 || logoMode || Animating) return -1;
             float cx = pieRect.X + pieRect.Width / 2f, cy = pieRect.Y + pieRect.Height / 2f;
             double dx = p.X - cx, dy = p.Y - cy, dist = Math.Sqrt(dx * dx + dy * dy);
-            if (dist > pieRect.Width / 2.0 + Theme.S(6) || dist < pieRect.Width * 0.29) return -1;
+            if (dist > pieRect.Width / 2.0 + Theme.S(6) || dist < pieRect.Width / 2.0 * HoleRatio) return -1;
+            if (rings > 0 && dist > pieRect.Width / 2.0 * InnerOuterRatio)
+            {
+                int a = HitArc(p);
+                return a >= 0 ? arcs[a].Owner : -1;
+            }
             double ang = Math.Atan2(dy, dx) * 180 / Math.PI - startAngle;
             ang = ((ang % 360) + 360) % 360;
             double acc = 0;
@@ -291,8 +416,9 @@ namespace DiskSpaceAnalyzer
         {
             base.OnMouseMove(e);
             int h = HitTest(e.Location);
-            Cursor = h >= 0 && slices[h].Dir != null ? Cursors.Hand : Cursors.Default;
-            if (h != hover) { hover = h; Invalidate(); }
+            int ha = HitArc(e.Location);
+            Cursor = ha >= 0 || (h >= 0 && slices[h].Dir != null) ? Cursors.Hand : Cursors.Default;
+            if (h != hover || ha != hoverArc) { hover = h; hoverArc = ha; Invalidate(); }
             if (h != reported)
             {
                 reported = h;
@@ -303,7 +429,7 @@ namespace DiskSpaceAnalyzer
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            if (hover != -1) { hover = -1; Invalidate(); }
+            if (hover != -1 || hoverArc != -1) { hover = -1; hoverArc = -1; Invalidate(); }
             if (reported != -1)
             {
                 reported = -1;
@@ -315,6 +441,8 @@ namespace DiskSpaceAnalyzer
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
+            int ha = HitArc(e.Location);
+            if (ha >= 0) { if (SliceClicked != null) SliceClicked(new ChartSlice { Dir = arcs[ha].Dir, Label = arcs[ha].Dir.Name }); return; }
             int h = HitTest(e.Location);
             if (h >= 0 && slices[h].Dir != null && SliceClicked != null) SliceClicked(slices[h]);
         }

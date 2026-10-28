@@ -30,6 +30,7 @@ jobs:
 
       - name: Master file table self-check (the runner is elevated)
         shell: pwsh
+        timeout-minutes: 10
         run: |
           $mft = (.\DiskSpaceAnalyzer.exe --cli scan C:\ --mft --files | Out-String)
           $dir = (.\DiskSpaceAnalyzer.exe --cli scan C:\ | Out-String)

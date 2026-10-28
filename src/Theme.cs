@@ -43,6 +43,7 @@ namespace DiskSpaceAnalyzer
         public static readonly Font FONT = new Font("Segoe UI", 10f);
         public static readonly Font FONT_11 = new Font("Segoe UI", 11f);
         public static readonly Font FONT_9 = new Font("Segoe UI", 9f);
+        public static readonly Font FONT_BOLD = new Font("Segoe UI", 10f, FontStyle.Bold);
 
         public static float Scale = 1f;
 
@@ -208,6 +209,9 @@ namespace DiskSpaceAnalyzer
 
         [DllImport("user32.dll")]
         public static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
 
         public static ScrollInfo GetScroll(IntPtr hwnd, bool vertical)
         {

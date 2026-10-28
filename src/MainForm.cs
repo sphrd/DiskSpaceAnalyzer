@@ -21,12 +21,13 @@ namespace DiskSpaceAnalyzer
         public long Total, Free;                 // capacity of the drive that holds Path (0 = unknown)
         public DirNode Node;                     // null until scanned
         public bool Scanning;
-        public List<FileEntry> Top = new List<FileEntry>();
+        public PrevNode Previous;                // the scan before the current one (for the Changes view)
+        public DateTime PreviousTime;
 
         public string DisplayName { get { return IsDrive && Label.Length > 0 ? Path + "  " + Label : Path; } }
     }
 
-    internal sealed class MainForm : Form
+    internal sealed partial class MainForm : Form
     {
         const string AppName = "Disk Space Analyzer";
         const int TopCount = 1000;
@@ -44,7 +45,6 @@ namespace DiskSpaceAnalyzer
         UpdateManager updates;
         /// <summary>Scanned tree of the root that holds the current selection (null when that root is not scanned).</summary>
         DirNode root { get { return active != null ? active.Node : null; } }
-        List<FileEntry> topFiles = new List<FileEntry>();
         Scanner scanner;
         DeleteJob deleteJob;
         bool busy;
@@ -52,22 +52,20 @@ namespace DiskSpaceAnalyzer
 
         readonly PathInput pathBox;
         readonly Label pathLabel;
-        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
+        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnAddList, btnDelete, btnAdmin, btnExport;
         readonly TitleBar titleBar;
         readonly Segmented measure;
         readonly Panel toolbar;
         readonly SplitContainer split, split2;
         readonly PieChart chart;
         readonly DarkTreeView tree;
-        readonly TabStrip tabs;
-        readonly ScrollHost contentsHost, largestHost;
-        readonly SizeListView contents, largest;
+        readonly SizeListView contents;
         readonly Label statusLabel, driveLabel;
         readonly BusyOverlay overlay;
         readonly System.Windows.Forms.Timer uiTimer;
         readonly ContextMenuStrip menu;
         readonly ToolTip tips = new ToolTip();
-        ToolStripMenuItem miOpen, miExplorer, miCopy, miRescan, miDelete;
+        ToolStripMenuItem miOpen, miExplorer, miCopy, miRescan, miAddList, miRecycle, miDelete;
 
         public MainForm(string initialPath)
         {
@@ -107,7 +105,9 @@ namespace DiskSpaceAnalyzer
             btnUp = Btn("Up", ButtonKind.Secondary, "Go to the parent folder (Backspace)", GoUp);
             btnRescan = Btn("Rescan folder", ButtonKind.Secondary, "Rescan the selected folder (F5)", RescanSelected);
             btnExplorer = Btn("Show in Explorer", ButtonKind.Secondary, "Open the selected item in Windows Explorer", ShowInExplorer);
+            btnAddList = Btn("Add to delete list", ButtonKind.Secondary, "Collect the selected items in the delete list; review them there, then delete them together (Insert)", AddSelectionToBasket);
             btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
+            btnExport = Btn("Export...", ButtonKind.Secondary, "Save the scan as a CSV file or an HTML report", ExportScan);
 
 
             measure = new Segmented("Size", "Size on disk");
@@ -115,7 +115,7 @@ namespace DiskSpaceAnalyzer
             tips.SetToolTip(measure, "Size: file lengths, as Explorer shows them. Size on disk: the space really used (compression, clusters, online-only cloud files)");
 
             toolbar = new Panel { Dock = DockStyle.Top, BackColor = Theme.BG };
-            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete, measure });
+            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnAddList, btnDelete, btnExport, measure });
             toolbar.Layout += (s, e) => LayoutToolbar();
 
             // Context menu
@@ -128,8 +128,10 @@ namespace DiskSpaceAnalyzer
             miExplorer = new ToolStripMenuItem("Show in Explorer", null, (s, e) => ShowInExplorer());
             miCopy = new ToolStripMenuItem("Copy path", null, (s, e) => CopyPath());
             miRescan = new ToolStripMenuItem("Rescan folder", null, (s, e) => RescanSelected()) { ShortcutKeyDisplayString = "F5" };
+            miAddList = new ToolStripMenuItem("Add to delete list", null, (s, e) => AddSelectionToBasket()) { ShortcutKeyDisplayString = "Ins" };
+            miRecycle = new ToolStripMenuItem("Move to Recycle Bin...", null, (s, e) => RecycleSelected());
             miDelete = new ToolStripMenuItem("Delete permanently...", null, (s, e) => DeleteSelected()) { ShortcutKeyDisplayString = "Del" };
-            menu.Items.AddRange(new ToolStripItem[] { miOpen, miExplorer, miCopy, miRescan, new ToolStripSeparator(), miDelete });
+            menu.Items.AddRange(new ToolStripItem[] { miOpen, miExplorer, miCopy, miRescan, new ToolStripSeparator(), miAddList, miRecycle, miDelete });
             foreach (ToolStripItem it in menu.Items) it.ForeColor = Theme.FG;
             miDelete.ForeColor = Theme.WARN_FG;
             menu.Opened += (s, e) => Theme.RoundPopup(menu.Handle);
@@ -142,7 +144,11 @@ namespace DiskSpaceAnalyzer
                 miExplorer.Enabled = any;
                 miCopy.Enabled = any;
                 miRescan.Enabled = any && !scanning && sel.Count == 1 && sel[0].IsDir;
-                miDelete.Enabled = any && !scanning;
+                bool deletable = any && !scanning && sel.All(i => i.CanDelete);
+                miAddList.Enabled = any && sel.All(i => i.CanDelete);
+                miAddList.Visible = lastView != (pBasket != null ? pBasket.List : null);
+                miRecycle.Enabled = deletable;
+                miDelete.Enabled = deletable;
             };
 
             // Folder tree. The image list only reserves the icon slot; glyphs are drawn by the tree.
@@ -172,43 +178,13 @@ namespace DiskSpaceAnalyzer
             treePanel.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(4), BackColor = Theme.SURFACE });
             treePanel.Controls.Add(new TreeHeader(tree, "Name", "Size", "% of parent") { Dock = DockStyle.Top });
 
-            // Folder contents
+            // Folder contents (the first view); the other views are built in Views.cs.
             contents = new SizeListView { ContextMenuStrip = menu };
-            contents.SetColumns(new[] { "Name", "Size", "% of folder", "Files", "Folders", "Modified" },
-                new[] { "name", "size", "size", "files", "dirs", "mod" }, new[] { 320, 90, 170, 90, 80, 140 });
+            contents.SetColumns(new[] { "Name", "Size", "% of folder", "Change", "Files", "Folders", "Modified" },
+                new[] { "name", "size", "size", "change", "files", "dirs", "mod" }, new[] { 300, 90, 170, 90, 80, 70, 140 });
             contents.BarColumn = 2;
-            contents.ColumnClick += (s, e) => { contents.SortBy(e.Column); if (current != null) UpdateChart(current); };
-            contents.HotItemChanged += it =>
-            {
-                int i;
-                chart.SetHover(it != null && rowSlice.TryGetValue(it, out i) ? i : -1);
-            };
-            contents.DoubleClick += (s, e) => OpenSelected();
-            contents.Enter += (s, e) => lastView = contents;
-
-            // Largest files
-            largest = new SizeListView { ContextMenuStrip = menu };
-            largest.SetColumns(new[] { "Name", "Size", "Folder", "Modified" },
-                new[] { "name", "size", "folder", "mod" }, new[] { 260, 90, 520, 140 });
-            largest.ColumnClick += (s, e) => largest.SortBy(e.Column);
-            largest.DoubleClick += (s, e) => OpenSelected();
-            largest.Enter += (s, e) => lastView = largest;
-
-            contentsHost = new ScrollHost(contents) { Dock = DockStyle.Fill };
-            largestHost = new ScrollHost(largest) { Dock = DockStyle.Fill, Visible = false };
-            tabs = new TabStrip("Folder contents", "Largest files (top " + TopCount + ")") { Dock = DockStyle.Top };
-            tabs.SelectedIndexChanged += (s, e) =>
-            {
-                contentsHost.Visible = tabs.SelectedIndex == 0;
-                largestHost.Visible = tabs.SelectedIndex == 1;
-            };
             var listPanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill, TrackFocus = true };
-            var gap = new Panel { Dock = DockStyle.Top, Height = S(6), BackColor = Theme.SURFACE };
-            listPanel.Controls.Add(contentsHost);
-            listPanel.Controls.Add(largestHost);
-            listPanel.Controls.Add(gap);
-            listPanel.Controls.Add(tabs);
-
+            BuildViews(listPanel);
             split = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = S(10), BackColor = Theme.BG };
             split.Panel1.BackColor = Theme.BG;
             split.Panel2.BackColor = Theme.BG;
@@ -217,7 +193,7 @@ namespace DiskSpaceAnalyzer
             // Pie chart pane (right). It is drawn from sizes already in memory, never from the disk.
             chart = new PieChart { Dock = DockStyle.Fill };
             chart.SliceClicked += sl => { if (sl.Dir != null && !busy) SelectDir(sl.Dir); };
-            chart.HoverChanged += i => contents.SetHighlight(i >= 0 && i < chart.Slices.Count ? chart.Slices[i].Rows : null);
+            chart.HoverChanged += i => ActivePage.List.SetHighlight(i >= 0 && i < chart.Slices.Count ? chart.Slices[i].Rows : null);
             var chartPanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill };
             chartPanel.Controls.Add(chart);
             split2 = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = S(10), BackColor = Theme.BG, FixedPanel = FixedPanel.Panel2 };
@@ -226,6 +202,8 @@ namespace DiskSpaceAnalyzer
             split2.Panel1.Controls.Add(listPanel);
             split2.Panel2.Controls.Add(chartPanel);
             split.Panel2.Controls.Add(split2);
+            split.Panel2.Controls.Add(new Panel { Dock = DockStyle.Top, Height = S(6), BackColor = Theme.BG });
+            split.Panel2.Controls.Add(viewTabs);
 
             // Status line
             var status = new Panel { Dock = DockStyle.Bottom, Height = Theme.FONT_9.Height + S(16), BackColor = Theme.BG };
@@ -239,7 +217,13 @@ namespace DiskSpaceAnalyzer
                 Dock = DockStyle.Right, AutoSize = true, Font = Theme.FONT_9, ForeColor = Theme.MUTED, BackColor = Theme.BG,
                 TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(0, S(8), 0, 0)
             };
+            liveLabel = new Label
+            {
+                Dock = DockStyle.Right, AutoSize = true, Font = Theme.FONT_9, ForeColor = Theme.MUTED, BackColor = Theme.BG,
+                TextAlign = ContentAlignment.MiddleRight, Padding = new Padding(S(12), S(8), S(12), 0)
+            };
             status.Controls.Add(statusLabel);
+            status.Controls.Add(liveLabel);
             status.Controls.Add(driveLabel);
 
             // Version in the status line; click it to check for updates by hand.
@@ -407,7 +391,7 @@ namespace DiskSpaceAnalyzer
             pathBox.Bounds = new Rectangle(px, 0, Math.Max(S(120), btnBrowse.Left - gap - px), h);
 
             int x = 0, y = h + S(8);
-            foreach (var b in new[] { btnUp, btnRescan, btnExplorer, btnDelete })
+            foreach (var b in new[] { btnUp, btnRescan, btnExplorer, btnAddList, btnDelete })
             {
                 if (b == btnDelete) x += groupGap - gap;
                 var p = b.GetPreferredSize(Size.Empty);
@@ -416,6 +400,8 @@ namespace DiskSpaceAnalyzer
             }
             var ms = measure.GetPreferredSize(Size.Empty);
             measure.Bounds = new Rectangle(w - ms.Width, y, ms.Width, h);
+            var es = btnExport.GetPreferredSize(Size.Empty);
+            btnExport.Bounds = new Rectangle(measure.Left - groupGap - es.Width, y, es.Width, h);
             int total = y + h + S(10);
             if (toolbar.Height != total) toolbar.Height = total;
         }
@@ -432,6 +418,8 @@ namespace DiskSpaceAnalyzer
             { ScanPath(((ScanRoot)tree.SelectedNode.Tag).Path); e.Handled = true; }
             else if (e.KeyCode == Keys.Enter && lastView != tree) { OpenSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.C && e.Control) { CopyPath(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Insert) { AddSelectionToBasket(); e.Handled = true; }
+            else if (e.KeyCode == Keys.F && e.Control) { ShowFilesSearch(); e.Handled = true; }
         }
 
         void ShowAbout()
@@ -520,17 +508,18 @@ namespace DiskSpaceAnalyzer
             }
 
             r.Node = result;
-            r.Top = Largest(result);
             RefreshCapacity(r);
+            RememberScan(r, result, !s.Cancelled);
+            StartWatching(r);
             // Keep the user's place: map a selection inside the old tree onto the new one; otherwise stay put,
             // unless nothing scanned was selected (e.g. at startup), then open the new result.
             DirNode target;
             if (current != null && oldNode != null && current.Top == oldNode) target = FindByPath(result, current.FullPath) ?? result;
             else if (active != null && active != r) target = current;   // browsing another drive: stay there
             else target = result;
-            if (active == r) { topFiles = r.Top; current = null; }
+            if (active == r) current = null;
             RefreshTree(target);
-            if (active == r) FillLargest();
+            ViewsChanged();
             UpdateDriveLabel();
             statusLabel.Text = string.Format("{0}: {1} in {2:N0} files and {3:N0} folders - scanned in {4:0.00} s, {5}{6}",
                 result.Name, Fmt.Size(result.Size), result.Files, result.Dirs, sw.Elapsed.TotalSeconds, s.Method,
@@ -645,7 +634,6 @@ namespace DiskSpaceAnalyzer
         {
             current = null;
             active = r;
-            topFiles = r.Top;
             RefreshCapacity(r);
             if (!busy) pathBox.Text = r.Path;
             contents.ResetHover();
@@ -654,9 +642,9 @@ namespace DiskSpaceAnalyzer
                 ? "Scanning " + r.DisplayName + "...\nThe results appear here when the scan finishes. You can browse other drives meanwhile."
                 : r.DisplayName + " has not been scanned yet.\nPress Scan, or double-click the drive, to analyze it.";
             contents.Invalidate();
-            FillLargest();
-            tabs.SetTitle(0, "Folder contents: " + r.Path + (r.Scanning ? "  (scanning...)" : "  (not scanned)"));
-            UpdateChartUnscanned(r);
+            ViewsChanged();
+            pContents.Caption.Text = r.DisplayName + (r.Scanning ? "  -  scanning..." : "  -  not scanned");
+            if (ActivePage == pContents) UpdateChartUnscanned(r);
             UpdateDriveLabel();
             UpdateButtons();
         }
@@ -669,38 +657,44 @@ namespace DiskSpaceAnalyzer
         const double MinOwnShare = 0.015;     // ...and only if they hold at least 1.5 % of the folder
 
         /// <summary>
-        /// Builds the pie from the folder contents list exactly as displayed: one slice per row in row order, except
-        /// that runs of consecutive small rows are merged into one "smaller items" slice. A drive root also gets
-        /// "System / not readable" and "Free space" at the end.
+        /// Slices for a list exactly as displayed: one slice per row in row order, except that runs of consecutive small
+        /// rows are merged into one "smaller items" slice. Rows of a group (duplicates) join their group's slice.
+        /// Fills rowSlice so hover links rows and slices in both directions.
         /// </summary>
-        void UpdateChart(DirNode d)
+        List<ChartSlice> BuildSlices(SizeListView lv, long total, string scope)
         {
             rowSlice.Clear();
-            var r = RootOf(d.Top);
-            if (r != null) RefreshCapacity(r);
-            var rows = contents.Items.Cast<ListViewItem>().Where(it => it.Tag is ItemInfo).ToList();
-            long folder = Math.Max(1, d.Size);
-
+            var rows = lv.Items.Cast<ListViewItem>().Where(it => it.Tag is ItemInfo).ToList();
+            total = Math.Max(1, total);
             var own = new HashSet<ListViewItem>(rows
-                .Where(it => ((ItemInfo)it.Tag).Size > 0 && ((ItemInfo)it.Tag).Size >= MinOwnShare * folder)
-                .OrderByDescending(it => ((ItemInfo)it.Tag).Size)
+                .Where(it => ((ItemInfo)it.Tag).GroupOf == null && ((ItemInfo)it.Tag).ChartSize > 0 && ((ItemInfo)it.Tag).ChartSize >= MinOwnShare * total)
+                .OrderByDescending(it => ((ItemInfo)it.Tag).ChartSize)
                 .Take(MaxOwnSlices));
 
             var slices = new List<ChartSlice>();
             var runs = new List<ChartSlice>();
+            var headSlice = new Dictionary<ItemInfo, int>();
             ChartSlice run = null;
             int colour = 0;
             foreach (var it in rows)
             {
                 var info = (ItemInfo)it.Tag;
+                int head;
+                if (info.GroupOf != null && headSlice.TryGetValue(info.GroupOf, out head))
+                {
+                    slices[head].Rows.Add(it);
+                    rowSlice[it] = head;
+                    continue;
+                }
+                long size = info.ChartSize;
                 if (own.Contains(it))
                 {
                     run = null;
                     var s = new ChartSlice
                     {
-                        Label = info.Name, Size = info.Size, Color = Theme.CHART[colour++ % Theme.CHART.Length],
-                        Detail = string.Format("{0:0.0} % of folder", 100.0 * info.Size / folder),
-                        Dir = info.IsDir ? info.Dir : null
+                        Label = info.Name, Size = size, Color = Theme.CHART[colour++ % Theme.CHART.Length],
+                        Detail = string.Format("{0:0.0} % {1}", 100.0 * size / total, scope),
+                        Dir = info.IsDir && IsAttached(info.Dir) ? info.Dir : null
                     };
                     s.Rows.Add(it);
                     slices.Add(s);
@@ -709,16 +703,26 @@ namespace DiskSpaceAnalyzer
                 {
                     if (run == null) { run = new ChartSlice { Color = Theme.CHART_OTHER }; slices.Add(run); runs.Add(run); }
                     run.Rows.Add(it);
-                    run.Size += info.Size;
+                    run.Size += Math.Max(0, size);
                 }
                 rowSlice[it] = slices.Count - 1;
+                headSlice[info] = slices.Count - 1;
             }
             foreach (var s in runs)
             {
-                s.Label = s.Rows.Count == 1 ? ((ItemInfo)s.Rows[0].Tag).Name : string.Format("{0:N0} smaller items", s.Rows.Count);
-                s.Detail = string.Format("{0:0.0} % of folder", 100.0 * s.Size / folder);
+                int n = s.Rows.Count(r => ((ItemInfo)r.Tag).GroupOf == null);
+                s.Label = n == 1 ? ((ItemInfo)s.Rows[0].Tag).Name : string.Format("{0:N0} smaller items", n);
+                s.Detail = string.Format("{0:0.0} % {1}", 100.0 * s.Size / total, scope);
             }
+            return slices;
+        }
 
+        /// <summary>Folder contents chart; a drive root also gets "System / not readable" and "Free space" at the end.</summary>
+        void UpdateChart(DirNode d)
+        {
+            var r = RootOf(d.Top);
+            if (r != null) RefreshCapacity(r);
+            var slices = BuildSlices(contents, d.Size, "of folder");
             string title = d.Parent == null && r != null ? r.DisplayName : d.Name, sub = d.FullPath;
             if (d.Parent == null && r != null && r.IsDrive && r.Total > 0)
             {
@@ -736,8 +740,11 @@ namespace DiskSpaceAnalyzer
                 });
                 sub = string.Format("{0} used of {1}  -  {2} free", Fmt.Size(used), Fmt.Size(r.Total), Fmt.Size(r.Free));
             }
-            chart.SetData(title, sub, slices);
+            chart.SetData(title, sub, slices, ContentsRings(d));
         }
+
+        /// <summary>Outer rings around the folder contents chart: subfolders and their subfolders.</summary>
+        static int ContentsRings(DirNode d) { return 2; }
 
         /// <summary>Nothing scanned yet: the chart pane shows the app logo; it morphs into the chart once the scan is done.</summary>
         void UpdateChartUnscanned(ScanRoot r)
@@ -798,6 +805,10 @@ namespace DiskSpaceAnalyzer
             btnRescan.Enabled = idle && root != null;
             btnExplorer.Enabled = !busy && root != null;
             btnDelete.Enabled = idle && root != null;
+            btnAddList.Enabled = !busy && root != null;
+            btnExport.Enabled = !busy && root != null;
+            measure.Enabled = !busy;
+            if (btnBasketRecycle != null) btnBasketRecycle.Enabled = btnBasketDelete.Enabled = idle && basket.Count > 0;
         }
 
         void UpdateProgress()
@@ -826,7 +837,8 @@ namespace DiskSpaceAnalyzer
                     scanBar.SetProgress(string.Format("Scanning {0}: {1} so far", Fmt.Shorten(s.RootPath ?? where, 60), Fmt.Size(bytes)), detail, -1);
             }
             if (j != null)
-                overlay.SetStatus(string.Format("Deleting: {0:N0} files removed", Interlocked.Read(ref j.FilesDeleted)), Fmt.Shorten(j.Current, 80));
+                overlay.SetStatus(j.Recycled > 0 ? string.Format("Moving to the Recycle Bin: {0:N0} items moved", Interlocked.Read(ref j.Recycled))
+                    : string.Format("Deleting: {0:N0} files removed", Interlocked.Read(ref j.FilesDeleted)), Fmt.Shorten(j.Current, 80));
         }
 
         void UpdateDriveLabel()
@@ -1010,8 +1022,6 @@ namespace DiskSpaceAnalyzer
             if (r != null && r != active)
             {
                 active = r;
-                topFiles = r.Top;
-                FillLargest();
                 UpdateDriveLabel();
                 if (!busy) pathBox.Text = r.Path;
             }
@@ -1031,6 +1041,7 @@ namespace DiskSpaceAnalyzer
                     Size = rest, Files = files.Count - MaxFilesShown, Percent = d.Size > 0 ? 100.0 * rest / d.Size : 0
                 });
             }
+            SetChanges(d, items);
             items.Sort(contents.Sorter.Compare);
 
             contents.BeginUpdate();
@@ -1040,7 +1051,7 @@ namespace DiskSpaceAnalyzer
             {
                 var lvi = new ListViewItem(new[]
                 {
-                    it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %",
+                    it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %", ChangeText(it),
                     it.Files.ToString("N0"), it.IsDir ? it.Dirs.ToString("N0") : "", Fmt.Date(it.Modified)
                 }) { Tag = it };
                 if (it.IsSummary) lvi.ForeColor = Theme.MUTED;
@@ -1048,36 +1059,18 @@ namespace DiskSpaceAnalyzer
                 return lvi;
             }).ToArray());
             contents.EndUpdate();
-            UpdateChart(d);
-
-            tabs.SetTitle(0, "Folder contents: " + Fmt.Shorten(d.Name, 40) + "  (" + Fmt.Size(d.Size) + ")");
+            pContents.Caption.Text = string.Format("{0}  -  {1} in {2:N0} files and {3:N0} folders{4}", Fmt.Shorten(d.FullPath, 90), Fmt.Size(d.Size),
+                d.Files, d.Dirs, ChangeCaption(d));
+            ContentsChanged();
             UpdateButtons();
-        }
-
-        void FillLargest()
-        {
-            var items = topFiles.Select(f =>
-            {
-                var it = ItemInfo.ForFile(f, 0);
-                it.Folder = f.Dir.FullPath;
-                return it;
-            }).ToList();
-            items.Sort(largest.Sorter.Compare);
-            largest.BeginUpdate();
-            largest.Items.Clear();
-            largest.Items.AddRange(items.Select(it => new ListViewItem(new[] { it.Name, Fmt.Size(it.Size), it.Folder, Fmt.Date(it.Modified) })
-            {
-                Tag = it
-            }).ToArray());
-            largest.EndUpdate();
         }
 
         List<ItemInfo> GetSelection()
         {
             var list = new List<ItemInfo>();
-            if (root == null) return list;
             if (lastView == tree || lastView == null)
             {
+                if (root == null) return list;
                 var d = tree.SelectedNode != null ? tree.SelectedNode.Tag as DirNode : null;
                 if (d != null) list.Add(ItemInfo.ForDir(d, d.Parent != null ? d.Parent.Size : d.Size));
             }
@@ -1087,7 +1080,7 @@ namespace DiskSpaceAnalyzer
                 foreach (ListViewItem lvi in lv.SelectedItems)
                 {
                     var it = lvi.Tag as ItemInfo;
-                    if (it != null && !it.IsSummary) list.Add(it);
+                    if (it != null && !it.IsSummary && !it.IsGroup && (it.CanDelete || it.FullPath != null)) list.Add(it);
                 }
             }
             return list;
@@ -1099,10 +1092,11 @@ namespace DiskSpaceAnalyzer
             if (sel.Count != 1 || busy) return;
             var it = sel[0];
             if (it.IsDir) { SelectDir(it.Dir); return; }
-            if (lastView == largest && IsAttached(it.File.Dir))
+            if (it.File == null) { ShowInExplorer(); return; }
+            if (lastView != contents && IsAttached(it.File.Dir))
             {
                 SelectDir(it.File.Dir);
-                tabs.SelectedIndex = 0;
+                viewTabs.SelectedIndex = 0;
                 foreach (ListViewItem lvi in contents.Items)
                 {
                     var c = (ItemInfo)lvi.Tag;
@@ -1143,28 +1137,6 @@ namespace DiskSpaceAnalyzer
 
         // ---------------------------------------------------------------- model updates
 
-        static void ResortUp(DirNode d)
-        {
-            for (var a = d; a != null; a = a.Parent)
-                if (a.Children != null) a.Children.Sort(DirNode.BySizeDesc);
-        }
-
-        /// <summary>The largest files under a scanned tree (from the index, by the current measure).</summary>
-        static List<FileEntry> Largest(DirNode node)
-        {
-            long c, s;
-            return FileIndex.Largest(node, TopCount, null, out c, out s);
-        }
-
-        /// <summary>Recomputes the largest-files list of the root that holds d after the tree changed.</summary>
-        void RecomputeTop(DirNode d)
-        {
-            var r = d != null ? RootOf(d.Top) : null;
-            if (r == null || r.Node == null) return;
-            r.Top = Largest(r.Node);
-            if (r == active) topFiles = r.Top;
-        }
-
         void RemoveNode(DirNode dn)
         {
             var p = dn.Parent;
@@ -1172,20 +1144,18 @@ namespace DiskSpaceAnalyzer
             p.Children.Remove(dn);
             p.AddUp(-dn.Bytes, -dn.Alloc, -dn.Files, -(dn.Dirs + 1));
             dn.Parent = null;
-            RecomputeTop(p);
         }
 
         void ReplaceNode(DirNode old, DirNode fresh)
         {
             var p = old.Parent;
-            if (p == null) { var r = RootOf(old); if (r != null) r.Node = fresh; RecomputeTop(fresh); return; }
+            if (p == null) { var r = RootOf(old); if (r != null) r.Node = fresh; return; }
             fresh.Name = old.Name;
             fresh.Modified = old.Modified;
             fresh.Parent = p;
             p.Children[p.Children.IndexOf(old)] = fresh;
             p.AddUp(fresh.Bytes - old.Bytes, fresh.Alloc - old.Alloc, fresh.Files - old.Files, fresh.Dirs - old.Dirs);
             old.Parent = null;
-            RecomputeTop(p);
         }
 
         void RemoveFile(FileEntry f)
@@ -1193,7 +1163,6 @@ namespace DiskSpaceAnalyzer
             var d = f.Dir;
             if (!IsAttached(d)) return;
             d.RemoveFileRec(f.Name);
-            RecomputeTop(d);
         }
 
         /// <summary>Switches every view between file size and size on disk.</summary>
@@ -1202,13 +1171,12 @@ namespace DiskSpaceAnalyzer
             if (DirNode.OnDisk == onDisk) return;
             DirNode.OnDisk = onDisk;
             foreach (var r in roots)
-                if (r.Node != null) { r.Node.ResortAll(); r.Top = Largest(r.Node); }
-            topFiles = active != null ? active.Top : new List<FileEntry>();
+                if (r.Node != null) r.Node.ResortAll();
             var keep = current;
             current = null;
             if (keep != null && IsAttached(keep)) RefreshTree(keep);
             else if (active != null) { RefreshTree(null); }
-            FillLargest();
+            ViewsChanged();
             statusLabel.Text = onDisk
                 ? "Showing size on disk: the space files really take (compressed and sparse files less, small files a whole cluster, online-only cloud files nothing)."
                 : "Showing file size: the length of each file, as Explorer's Size column shows it.";
@@ -1244,88 +1212,12 @@ namespace DiskSpaceAnalyzer
                 if (inside) target = FindByPath(fresh, here) ?? fresh;
             }
             if (target == null || !IsAttached(target)) target = dir.Parent;
+            IgnoreOwnChanges();
             current = null;
             RefreshTree(target);
-            FillLargest();
+            ViewsChanged();
             UpdateDriveLabel();
             statusLabel.Text = string.Format("Rescanned {0}: {1} in {2:0.00} s", path, Fmt.Size(fresh.Size), sw.Elapsed.TotalSeconds);
-        }
-
-        async void DeleteSelected()
-        {
-            if (busy || scanning || root == null) return;
-            var sel = GetSelection();
-            if (sel.Count == 0) return;
-            if (sel.Any(i => i.IsDir && i.Dir.Parent == null))
-            {
-                MessageBox.Show(this, "The scanned root folder itself cannot be deleted here.\nSelect items inside it instead.",
-                    AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            long total = sel.Sum(i => i.Size);
-            string list = string.Join("\n", sel.Take(12).Select(i => "    " + Fmt.Shorten(i.FullPath, 90) + "   (" + Fmt.Size(i.Size) + ")"));
-            if (sel.Count > 12) list += string.Format("\n    ... and {0:N0} more", sel.Count - 12);
-            string msg = string.Format("Permanently delete {0} item{1} ({2})?\n\n{3}\n\nThis bypasses the Recycle Bin and CANNOT be undone.",
-                sel.Count, sel.Count == 1 ? "" : "s", Fmt.Size(total), list);
-            string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-            string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-            if (sel.Any(i => IsWithin(i.FullPath, win) || IsWithin(i.FullPath, pf) || IsWithin(i.FullPath, pf86)))
-                msg += "\n\nWARNING: the selection includes Windows or Program Files content. Deleting it can break Windows or installed programs.";
-            if (MessageBox.Show(this, msg, AppName + " - confirm permanent delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
-
-            DirNode target = current;
-            foreach (var it in sel)
-                if (it.IsDir && current != null && current.IsUnder(it.Dir)) target = it.Dir.Parent;
-
-            long before = root.Size;
-            var job = new DeleteJob();
-            deleteJob = job;
-            SetBusy(true);
-            var paths = sel.Select(i => i.FullPath).ToList();
-            try
-            {
-                await RunThread(() =>
-                {
-                    for (int k = 0; k < sel.Count; k++)
-                        if (sel[k].IsDir) job.DeleteDirectory(paths[k]); else job.DeleteFile(paths[k]);
-                });
-            }
-            finally { deleteJob = null; SetBusy(false); }
-
-            // Files first: removing folders detaches nodes, and file updates walk the parent chain.
-            for (int k = 0; k < sel.Count; k++)
-                if (!sel[k].IsDir && !Native.Exists(paths[k])) RemoveFile(sel[k].File);
-
-            for (int k = 0; k < sel.Count; k++)
-            {
-                if (!sel[k].IsDir || !IsAttached(sel[k].Dir)) continue;
-                var dn = sel[k].Dir;
-                if (!Native.Exists(paths[k])) { RemoveNode(dn); continue; }
-                var s = new Scanner();
-                DirNode fresh = null;
-                string p = paths[k];
-                await RunThread(() => fresh = s.Run(p));
-                ReplaceNode(dn, fresh);
-                if (target == dn) target = fresh;
-            }
-
-            RefreshTree(IsAttached(target) ? target : root);
-            FillLargest();
-            UpdateDriveLabel();
-            if (lastView != null && lastView.Visible) lastView.Focus();
-            statusLabel.Text = string.Format("Freed {0}. {1:N0} files deleted{2}.", Fmt.Size(before - root.Size), job.FilesDeleted,
-                job.Errors.Count > 0 ? string.Format(", {0:N0} items could not be deleted", job.Errors.Count) : "");
-
-            if (job.Errors.Count > 0)
-            {
-                string err = string.Join("\n", job.Errors.Take(20).Select(e => Fmt.Shorten(e, 160)));
-                if (job.Errors.Count > 20) err += string.Format("\n... and {0:N0} more", job.Errors.Count - 20);
-                MessageBox.Show(this, "Some items could not be deleted (in use, or access denied" + (isAdmin ? "" : " - try Run as administrator") + "):\n\n" + err,
-                    AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
         }
 
         static bool IsWithin(string path, string folder)

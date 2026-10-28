@@ -72,7 +72,9 @@ namespace DiskSpaceAnalyzer
             string path = node.FullPath;
             Current = path;
             List<DirNode> subs = null;
+#pragma warning disable 420   // cancel is only polled
             FileRec[] files = ReadFolder(path, node, ref subs, cluster, ref cancel);
+#pragma warning restore 420
 
             node.Children = subs;
             if (files != null)

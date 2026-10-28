@@ -162,6 +162,134 @@ namespace DiskSpaceAnalyzer
         protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
     }
 
+    /// <summary>Text box in a rounded SURFACE field with a muted placeholder; raises TextChangedDelayed after typing pauses.</summary>
+    internal sealed class SearchBox : RoundedPanel
+    {
+        public readonly TextBox Box;
+        public event EventHandler TextChangedDelayed;
+        readonly Timer delay = new Timer { Interval = 300 };
+
+        public SearchBox(string placeholder) : base(8, 5)
+        {
+            Box = new TextBox { BorderStyle = BorderStyle.None, BackColor = Theme.SURFACE, ForeColor = Theme.FG, Font = Theme.FONT };
+            Controls.Add(Box);
+            Box.HandleCreated += (s, e) => Theme.SendMessage(Box.Handle, 0x1501, (IntPtr)1, placeholder);   // EM_SETCUEBANNER
+            Box.GotFocus += (s, e) => Highlight = true;
+            Box.LostFocus += (s, e) => Highlight = false;
+            Box.TextChanged += (s, e) => { delay.Stop(); delay.Start(); };
+            Box.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; delay.Stop(); Fire(); }
+                else if (e.KeyCode == Keys.Escape && Box.Text.Length > 0) { e.SuppressKeyPress = true; Box.Text = ""; }
+            };
+            delay.Tick += (s, e) => { delay.Stop(); Fire(); };
+            MouseDown += (s, e) => Box.Focus();
+            Cursor = Cursors.IBeam;
+        }
+
+        void Fire() { if (TextChangedDelayed != null) TextChangedDelayed(this, EventArgs.Empty); }
+
+        public override string Text
+        {
+            get { return Box != null ? Box.Text : ""; }
+            set { if (Box != null) Box.Text = value; }
+        }
+
+        public int PreferredHeight { get { return Box.PreferredHeight + 2 * Padding.Top + Theme.S(4); } }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            if (Box == null) return;
+            int x = Padding.Left + Theme.S(3);
+            Box.Bounds = new Rectangle(x, (Height - Box.PreferredHeight) / 2, Math.Max(10, Width - 2 * x), Box.PreferredHeight);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) delay.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>Drop-down choice: the current choice and a chevron in a rounded field; click opens a styled list.</summary>
+    internal sealed class ChoiceBox : RoundedPanel
+    {
+        readonly string[] choices;
+        readonly string prefix;
+        int selected;
+        bool hover;
+        readonly ToolStripDropDown popup;
+        DateTime closedAt = DateTime.MinValue;
+        public event EventHandler SelectedIndexChanged;
+
+        public ChoiceBox(string prefix, params string[] choices) : base(8, 5)
+        {
+            this.prefix = prefix;
+            this.choices = choices;
+            Font = Theme.FONT;
+            Cursor = Cursors.Hand;
+            popup = new ToolStripDropDown
+            {
+                Renderer = new DarkRenderer(), BackColor = Theme.SURFACE, ForeColor = Theme.FG,
+                Padding = new Padding(Theme.S(4)), DropShadowEnabled = !Theme.HasDwmCorners
+            };
+            popup.Opened += (s, e) => Theme.RoundPopup(popup.Handle);
+            popup.Closed += (s, e) => { closedAt = DateTime.UtcNow; Highlight = false; };
+        }
+
+        public int SelectedIndex
+        {
+            get { return selected; }
+            set
+            {
+                if (selected == value) return;
+                selected = value;
+                Invalidate();
+                if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+            }
+        }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            int w = 0;
+            foreach (var c in choices) w = Math.Max(w, TextRenderer.MeasureText(prefix + c, Font, Size.Empty, TextFormatFlags.NoPadding).Width);
+            return new Size(w + Theme.S(44), Font.Height + Theme.S(12));
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); hover = true; Invalidate(); }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = false; Invalidate(); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            var r = new Rectangle(Theme.S(10), 0, Width - Theme.S(36), Height);
+            TextRenderer.DrawText(g, prefix + choices[selected], Font, r, Enabled ? Theme.FG : Theme.DISABLED_FG,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+            int s = Theme.S(10);
+            Theme.DrawChevron(g, new Rectangle(Width - Theme.S(22), (Height - s) / 2, s, s), hover || popup.Visible ? Theme.ACCENT : Theme.MUTED, true);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button != MouseButtons.Left || !Enabled) return;
+            if (popup.Visible) { popup.Close(); return; }
+            if ((DateTime.UtcNow - closedAt).TotalSeconds < 0.25) return;
+            popup.Items.Clear();
+            for (int i = 0; i < choices.Length; i++)
+            {
+                int k = i;
+                var item = new ToolStripMenuItem(choices[i]) { Font = Theme.FONT, ForeColor = i == selected ? Theme.ACCENT : Theme.FG };
+                item.Click += (s2, e2) => SelectedIndex = k;
+                popup.Items.Add(item);
+            }
+            popup.MinimumSize = new Size(Width, 0);
+            Highlight = true;
+            popup.Show(this, new Point(0, Height + Theme.S(2)));
+        }
+    }
+
     /// <summary>Rounded SURFACE panel with a BORDER outline that turns ACCENT while it holds the focus.</summary>
     internal class RoundedPanel : Panel
     {
