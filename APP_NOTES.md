@@ -108,6 +108,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - 2026-10-28: "14-check self-test runs on both platforms in CI. what does it mean? do you save every scan? that builds up in
   size, save only last one. in about section mention that running as admin will increase speed. also mention the keyboard
   shortcuts." + crash report: PathTooLongException in ApplyChanges (live updates) when run as administrator.
+- 2026-10-28: "in the chart, when not hovering on pies, instead of writing total in the middle right the name of hte current dir.
+  also make it clickable so that i can jump one dir above by clicking. (as a way to reverse the click on one of the pies).
+  default to Size on disk instead of Size. The pie chart is not animating transforming from the logo now, why?"
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
