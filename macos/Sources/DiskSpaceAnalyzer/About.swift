@@ -62,7 +62,7 @@ class AppDialog: NSWindowController, NSWindowDelegate {
         w.makeKeyAndOrderFront(nil)
     }
 
-    func close() { window?.close() }
+    override func close() { window?.close() }
     func windowWillClose(_ notification: Notification) { onClose?() }
     override func cancelOperation(_ sender: Any?) { close() }
 }
