@@ -214,7 +214,15 @@ final class ShotRun {
         print("saved \(path)")
     }
 
-    func shot(_ name: String) { if let v = app.main.window?.contentView { save(v, name) } }
+    func shot(_ name: String) {
+        guard let v = app.main.window?.contentView else { return }
+        save(v, name)
+        // The chart's slices in drawing order (clockwise from 12 o'clock), so CI logs show what each picture contains.
+        for s in app.main.chart.slices {
+            let colour = s.color == T.CHART_OTHER ? "grey" : s.empty ? "empty" : MainWindowController.hex(s.color)
+            print("  slice \(colour)  \(Fmt.size(s.size))  \(s.rows.count) rows  \(s.label)")
+        }
+    }
 
     func start() {
         let w = app.main!
