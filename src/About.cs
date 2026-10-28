@@ -84,13 +84,26 @@ namespace DiskSpaceAnalyzer
         }
     }
 
-    /// <summary>About window: logo, name, version, author, description and licence, repository link.</summary>
+    /// <summary>About window: logo, name, version, author, description and licence, repository link, speed tip, shortcuts.</summary>
     internal sealed class AboutForm : AppDialog
     {
         const string RepoUrl = "https://github.com/sphrd/DiskSpaceAnalyzer";
 
+        static readonly string[,] Shortcuts =
+        {
+            { "Enter", "Open the selected folder or file" },
+            { "Backspace", "Up to the parent folder" },
+            { "F5", "Rescan the selected folder" },
+            { "Insert", "Add to the delete list" },
+            { "Del", "Delete permanently" },
+            { "Ctrl+F", "Search files" },
+            { "Ctrl+C", "Copy path" },
+            { "F1", "About" },
+        };
+
         public AboutForm(Action checkForUpdates) : base("About Disk Space Analyzer")
         {
+            ClientSize = new Size(Theme.S(560), ClientSize.Height);
             int y = ContentTop;
             AddLabel("Disk Space Analyzer", HeadingFont, Theme.FG, ref y, Theme.S(4));
             AddLabel("Version " + Updater.Short(Updater.Current), Theme.FONT, Theme.FG, ref y, Theme.S(2));
@@ -101,6 +114,25 @@ namespace DiskSpaceAnalyzer
             link.MouseEnter += (s, e) => link.ForeColor = Theme.ACCENT_ACTIVE;
             link.MouseLeave += (s, e) => link.ForeColor = Theme.ACCENT;
             link.Click += (s, e) => Updater.Open(RepoUrl);
+            y += Theme.S(16);
+            AddLabel("Faster scans", Theme.FONT_BOLD, Theme.FG, ref y, Theme.S(2));
+            bool admin = new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent())
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            AddLabel(admin
+                ? "Running as administrator: whole NTFS drives are read straight from their master file table, about a million files in seconds."
+                : "Run as administrator (button in the toolbar) to read whole NTFS drives straight from their master file table: " +
+                  "about a million files in seconds, many times faster than going folder by folder.", Theme.FONT_9, Theme.MUTED, ref y, Theme.S(12));
+            AddLabel("Keyboard shortcuts", Theme.FONT_BOLD, Theme.FG, ref y, Theme.S(4));
+            int keyW = Theme.S(90), rowH = Theme.FONT_9.Height + Theme.S(3);
+            for (int i = 0; i < Shortcuts.GetLength(0); i++)
+            {
+                Controls.Add(new Label { Text = Shortcuts[i, 0], Font = Theme.FONT_9, ForeColor = Theme.FG, BackColor = Theme.BG, UseMnemonic = false,
+                    Bounds = new Rectangle(ContentX, y, keyW, rowH) });
+                Controls.Add(new Label { Text = Shortcuts[i, 1], Font = Theme.FONT_9, ForeColor = Theme.MUTED, BackColor = Theme.BG, UseMnemonic = false,
+                    Bounds = new Rectangle(ContentX + keyW, y, ContentWidth - keyW, rowH) });
+                y += rowH;
+            }
+            ClientSize = new Size(ClientSize.Width, y + Theme.S(84));
             SetButtons(Button("Close", Close), Button("Check for updates", () => { Close(); if (checkForUpdates != null) checkForUpdates(); }));
         }
     }

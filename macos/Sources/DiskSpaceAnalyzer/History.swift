@@ -42,6 +42,12 @@ enum History {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let packed = try (data as NSData).compressed(using: .zlib) as Data
         try packed.write(to: URL(fileURLWithPath: file(for: rootPath)), options: .atomic)
+        // Only the last scan of each drive or folder is kept, and only for the 10 most recently scanned ones.
+        let dir = URL(fileURLWithPath: folder)
+        if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) {
+            let dated = files.filter { $0.pathExtension == "dsa" }.map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+            for (u, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(10) { try? FileManager.default.removeItem(at: u) }
+        }
     }
 
     static func load(_ rootPath: String) -> (PrevNode, Date)? {

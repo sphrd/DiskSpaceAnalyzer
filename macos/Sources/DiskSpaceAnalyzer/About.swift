@@ -23,6 +23,12 @@ class AppDialog: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     var contentWidth: CGFloat { root.bounds.width - AppDialog.contentX - 24 }
+
+    /// Resizes the dialog (call before adding labels for a new width, and before setButtons for a new height).
+    func resize(width: CGFloat, height: CGFloat) {
+        window?.setContentSize(NSSize(width: width, height: height))
+        root.frame = NSRect(x: 0, y: 0, width: width, height: height)
+    }
     var buttonsTop: CGFloat { buttons.first?.frame.minY ?? root.bounds.height - 20 }
 
     @discardableResult
@@ -73,6 +79,7 @@ final class AboutWindow: AppDialog {
 
     convenience init(checkForUpdates: @escaping () -> Void) {
         self.init(title: "About Disk Space Analyzer")
+        resize(width: 540, height: 600)
         var y: CGFloat = 26
         addLabel("Disk Space Analyzer", NSFont.boldSystemFont(ofSize: 20), T.FG, y: &y, height: 28, gapAfter: 4)
         addLabel("Version \(Updater.currentString)", Theme.font, T.FG, y: &y, height: 19)
@@ -81,6 +88,22 @@ final class AboutWindow: AppDialog {
         let link = LinkLabel("github.com/sphrd/DiskSpaceAnalyzer") { NSWorkspace.shared.open(AboutWindow.repoURL) }
         link.frame = NSRect(x: AppDialog.contentX, y: y, width: 300, height: 17)
         root.addSubview(link)
+        y += 17 + 18
+        addLabel("Complete scans", NSFont.boldSystemFont(ofSize: 13), T.FG, y: &y, height: 18, gapAfter: 2)
+        addLabel("Give the app Full Disk Access (button in the toolbar) so it can read every folder; without it macOS hides some folders and their sizes are missing.",
+                 Theme.font9, T.MUTED, y: &y, height: 46, gapAfter: 12)
+        addLabel("Keyboard shortcuts", NSFont.boldSystemFont(ofSize: 13), T.FG, y: &y, height: 18, gapAfter: 4)
+        let keys: [(String, String)] = [("Return", "Open the selected folder or file"), ("⌘↑", "Up to the parent folder"), ("⌘R", "Rescan the selected folder"),
+                                        ("⇧⌘D", "Add to the delete list"), ("⌘⌫", "Delete permanently"), ("⌘F", "Search files"), ("⇧⌘E", "Export")]
+        for (k, what) in keys {
+            let a = NSTextField(labelWithString: k); a.font = Theme.font9; a.textColor = T.FG
+            a.frame = NSRect(x: AppDialog.contentX, y: y, width: 80, height: 17)
+            let b = NSTextField(labelWithString: what); b.font = Theme.font9; b.textColor = T.MUTED
+            b.frame = NSRect(x: AppDialog.contentX + 80, y: y, width: contentWidth - 80, height: 17)
+            root.addSubview(a); root.addSubview(b)
+            y += 19
+        }
+        resize(width: 540, height: y + 76)
         setButtons([("Close", { [weak self] in self?.close() }), ("Check for updates", { [weak self] in self?.close(); checkForUpdates() })])
     }
 }

@@ -32,6 +32,7 @@ namespace DiskSpaceAnalyzer
     internal static class History
     {
         const int Magic = 0x31415344;   // "DSA1"
+        const int MaxFiles = 10;
 
         public static string Folder
         {
@@ -117,6 +118,12 @@ namespace DiskSpaceAnalyzer
             }
             if (File.Exists(f)) File.Delete(f);
             File.Move(tmp, f);
+            // Only the last scan of each drive or folder is kept, and only for the 10 most recently scanned ones.
+            try
+            {
+                foreach (var old in new DirectoryInfo(Folder).GetFiles("*.dsa").OrderByDescending(x => x.LastWriteTimeUtc).Skip(MaxFiles)) old.Delete();
+            }
+            catch (Exception) { }
         }
     }
 

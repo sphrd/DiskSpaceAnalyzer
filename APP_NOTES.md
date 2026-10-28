@@ -105,6 +105,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
   scan, CSV/HTML export, size on disk vs file size (compressed, sparse, hard links, OneDrive online-only), refresh after
   changes (live updates).
 
+- 2026-10-28: "14-check self-test runs on both platforms in CI. what does it mean? do you save every scan? that builds up in
+  size, save only last one. in about section mention that running as admin will increase speed. also mention the keyboard
+  shortcuts." + crash report: PathTooLongException in ApplyChanges (live updates) when run as administrator.
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -277,6 +280,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   afterwards `ApplyDeleted` drops removed nodes and rescans folders that still exist. Contents-only targets skip files in
   use quietly (counted). Recycle uses `SHFileOperation` with ALLOWUNDO + WANTNUKEWARNING.
 - **History:** `%LOCALAPPDATA%\DiskSpaceAnalyzer\history\<root>.dsa` (gzip: folder names and sizes, no file names).
+  One file per drive/folder, overwritten by each full scan; only the 10 most recently written files are kept.
+- **Gotcha (v1.7.0 crash):** `Path.GetDirectoryName`/`GetFileName` throw `PathTooLongException` beyond 260 characters
+  (the exe has no 4.6.2+ target framework, so .NET uses legacy path checks). The live-update timer hit it on a real drive.
+  Paths from the disk go through `Native.ParentDir` / `Native.FileName` / `Native.IsDirectory`, the timer body is
+  guarded, and the self-test now creates and removes a 347-character path while live updates run.
 - **Live updates:** `FileSystemWatcher` per scanned root; changes are applied every 2 s on the UI thread (re-read a
   folder's own files, scan new folders, drop removed ones, rename in place); the contents list refreshes at most every
   4 s and not while rows are selected. Our own deletes are ignored for 3 s. Overflow shows "Changes missed - rescan".

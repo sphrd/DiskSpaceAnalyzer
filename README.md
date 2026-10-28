@@ -60,8 +60,9 @@ open list, slice for row, and hovering one highlights the other)
   developer caches (npm, NuGet, pip, Gradle, Maven, Cargo, Go...), node_modules
   folders, old installers in Downloads, Windows.old. Each says what deleting it
   means; caches and temporary folders are emptied, not removed.
-- **Changes:** every full scan is remembered (folder sizes only, on this PC), so
-  the next scan shows which folders grew or shrank since.
+- **Changes:** the last full scan of each drive or folder is remembered (folder
+  sizes only, on this PC, at most 10 drives/folders), so the next scan shows
+  which folders grew or shrank since.
 
 ![Duplicates view: groups of identical files and the space their extra copies take (demo data)](assets/screenshot-duplicates.png)
 
@@ -82,7 +83,7 @@ open list, slice for row, and hovering one highlights the other)
 
 - **Export** the selected folder as an HTML report (summary, chart, largest
   folders and files, file types) or as CSV (every folder, or the list shown).
-- **About** (<kbd>F1</kbd>) and **Check for updates** in the title bar; updates install themselves.
+- **About** (<kbd>F1</kbd>, with the keyboard shortcuts) and **Check for updates** in the title bar; updates install themselves.
 - **Rescan folder** (<kbd>F5</kbd>), **Show in Explorer**, **Copy path**,
   drag-and-drop a folder onto the window, and **Run as administrator**.
 - **Dark, flat, rounded UI**: one blue accent, amber only for destructive actions.

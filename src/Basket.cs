@@ -44,7 +44,7 @@ namespace DiskSpaceAnalyzer
                 {
                     Targets = new List<DeleteTarget> { t }, Name = t.Label, Size = t.Size, FolderIcon = t.IsDir,
                     Path = t.RecycleBin ? null : t.Path, Note = t.Note, Percent = total > 0 ? 100.0 * t.Size / total : 0,
-                    Folder = t.RecycleBin ? "All drives" : t.ContentsOnly ? t.Path : System.IO.Path.GetDirectoryName(t.Path) ?? t.Path
+                    Folder = t.RecycleBin ? "All drives" : t.ContentsOnly ? t.Path : Native.ParentDir(t.Path) ?? t.Path
                 };
                 rows.Add(Row(it, it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %", it.Folder, it.Note));
             }
@@ -236,8 +236,8 @@ namespace DiskSpaceAnalyzer
                 if (t.RecycleBin) continue;
                 if (!t.IsDir)
                 {
-                    var d = t.File != null && IsAttached(t.File.Dir) ? t.File.Dir : FindScanned(System.IO.Path.GetDirectoryName(t.Path), true);
-                    if (d != null && !Native.Exists(t.Path)) d.RemoveFileRec(System.IO.Path.GetFileName(t.Path));
+                    var d = t.File != null && IsAttached(t.File.Dir) ? t.File.Dir : FindScanned(Native.ParentDir(t.Path), true);
+                    if (d != null && !Native.Exists(t.Path)) d.RemoveFileRec(Native.FileName(t.Path));
                     continue;
                 }
                 var dn = t.Dir != null && IsAttached(t.Dir) ? t.Dir : FindScanned(t.Path, true);

@@ -100,6 +100,19 @@ namespace DiskSpaceAnalyzer
                 measure.SelectedIndex = 1;
                 await Task.Delay(1500);
                 SaveShot((pages.Count + 1) + "-size-on-disk");
+                using (var about = new AboutForm(null))
+                {
+                    about.StartPosition = FormStartPosition.Manual;
+                    about.Location = new Point(Left + 80, Top + 80);
+                    about.Show(this);
+                    await Task.Delay(800);
+                    using (var bmp = new Bitmap(about.Width, about.Height))
+                    {
+                        using (var g = Graphics.FromImage(bmp)) { IntPtr hdc = g.GetHdc(); PrintWindow(about.Handle, hdc, 2); g.ReleaseHdc(hdc); }
+                        bmp.Save(Path.Combine(ShotDir, (pages.Count + 2) + "-about.png"), ImageFormat.Png);
+                    }
+                    about.Close();
+                }
             }
             catch (Exception ex) { try { File.WriteAllText(Path.Combine(ShotDir, "error.txt"), ex.ToString()); } catch (Exception) { } }
             Close();
@@ -130,6 +143,19 @@ namespace DiskSpaceAnalyzer
                 var e = FindScanned(P(@"E\deep"), true);
                 check(a != null && a.LocalFiles == 3, "live: new file in A noticed");
                 check(e != null && e.Files == 1 && root.Files == 11, "live: new folder E\\deep with its file noticed (total " + root.Files + " files)");
+
+                // Live: a file in a folder whose path is longer than 260 characters (crashed v1.7.0).
+                string longDir = P(@"L\" + new string('x', 120) + @"\" + new string('y', 120) + @"\" + new string('z', 40));
+                string sofar = P("L");
+                SelfTest.MakeDirLong(sofar);
+                foreach (var part in longDir.Substring(sofar.Length + 1).Split('\\')) { sofar += @"\" + part; SelfTest.MakeDirLong(sofar); }
+                await Task.Delay(2500);
+                SelfTest.MakeFileLong(longDir + @"\long.txt");
+                for (int i = 0; i < 40 && root.Files != 12; i++) await Task.Delay(250);
+                check(root.Files == 12 && FindScanned(longDir, true) != null, "live: a file in a " + longDir.Length + "-character path noticed, no crash");
+                new DeleteJob().DeleteDirectory(P("L"));
+                for (int i = 0; i < 40 && root.Files != 11; i++) await Task.Delay(250);
+                check(root.Files == 11, "live: the long folder removed again");
 
                 // Duplicates: dup1.bin and dup2.bin are identical; other.bin has the same size but other content.
                 SelectDir(root);
@@ -200,6 +226,21 @@ namespace DiskSpaceAnalyzer
     /// <summary>Builds the self-test folder: 9 files in 8 folders, two identical files, a node_modules folder.</summary>
     internal static class SelfTest
     {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        static extern bool CreateDirectoryW(string path, IntPtr security);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sec, uint disposition, uint flags, IntPtr template);
+
+        // .NET Framework's path checks stop at 260 characters; the Win32 calls with \\?\ do not.
+        public static void MakeDirLong(string path) { CreateDirectoryW(Native.LongPath(path), IntPtr.Zero); }
+
+        public static void MakeFileLong(string path)
+        {
+            using (var h = CreateFileW(Native.LongPath(path), 0x40000000, 0, IntPtr.Zero, 2, 0, IntPtr.Zero))
+                if (h.IsInvalid) throw new IOException("cannot create " + path);
+        }
+
         public static string Prepare(string dir)
         {
             dir = Path.GetFullPath(dir);

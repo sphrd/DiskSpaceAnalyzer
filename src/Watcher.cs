@@ -32,7 +32,7 @@ namespace DiskSpaceAnalyzer
             if (liveTimer == null)
             {
                 liveTimer = new System.Windows.Forms.Timer { Interval = 2000 };
-                liveTimer.Tick += (s, e) => ApplyChanges();
+                liveTimer.Tick += (s, e) => { try { ApplyChanges(); } catch (Exception) { livePending = false; } };   // a live update must never take the app down
                 liveTimer.Start();
             }
             try
@@ -108,29 +108,29 @@ namespace DiskSpaceAnalyzer
             FsChange c;
             while (n++ < 20000 && fsChanges.TryDequeue(out c))
             {
-                var parent = FindScanned(Path.GetDirectoryName(c.Path), true);
+                var parent = FindScanned(Native.ParentDir(c.Path), true);
                 if (c.Kind == WatcherChangeTypes.Renamed && c.OldPath != null)
                 {
                     var oldNode = FindScanned(c.OldPath, true);
                     if (oldNode != null && oldNode.Parent != null)
                     {
-                        var newParent = FindScanned(Path.GetDirectoryName(c.Path), true);
-                        if (newParent == oldNode.Parent) { oldNode.Name = Path.GetFileName(c.Path); oldNode.Parent.Children.Sort(DirNode.BySizeDesc); structure = true; }
+                        var newParent = FindScanned(Native.ParentDir(c.Path), true);
+                        if (newParent == oldNode.Parent) { oldNode.Name = Native.FileName(c.Path); oldNode.Parent.Children.Sort(DirNode.BySizeDesc); structure = true; }
                         else { RemoveNode(oldNode); added.Add(c.Path); structure = true; }
                         continue;
                     }
-                    var oldParent = FindScanned(Path.GetDirectoryName(c.OldPath), true);
+                    var oldParent = FindScanned(Native.ParentDir(c.OldPath), true);
                     if (oldParent != null) files.Add(oldParent);
                 }
                 if (parent == null) continue;
-                string name = Path.GetFileName(c.Path);
+                string name = Native.FileName(c.Path);
                 var node = parent.Child(name);
                 if (c.Kind == WatcherChangeTypes.Deleted)
                 {
                     if (node != null) { RemoveNode(node); structure = true; }
                     else files.Add(parent);
                 }
-                else if (Directory.Exists(c.Path))
+                else if (Native.IsDirectory(c.Path))
                 {
                     if (node == null && c.Kind != WatcherChangeTypes.Changed) { added.Add(c.Path); structure = true; }
                 }
@@ -139,10 +139,10 @@ namespace DiskSpaceAnalyzer
             foreach (var d in files) if (IsAttached(d)) Scanner.RefreshFiles(d);
             foreach (var p in added.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                var parent = FindScanned(Path.GetDirectoryName(p), true);
-                if (parent == null || parent.Child(Path.GetFileName(p)) != null || !Directory.Exists(p)) continue;
+                var parent = FindScanned(Native.ParentDir(p), true);
+                if (parent == null || parent.Child(Native.FileName(p)) != null || !Native.IsDirectory(p)) continue;
                 var fresh = new Scanner().Run(p);   // usually small (a new folder); large copies arrive folder by folder anyway
-                fresh.Name = Path.GetFileName(p);
+                fresh.Name = Native.FileName(p);
                 fresh.Parent = parent;
                 fresh.Modified = DateTime.Now.ToFileTime();
                 if (parent.Children == null) parent.Children = new List<DirNode>();

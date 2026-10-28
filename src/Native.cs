@@ -100,6 +100,32 @@ namespace DiskSpaceAnalyzer
             return @"\\?\" + p;
         }
 
+        /// <summary>Parent folder of a path ("C:\a\b" -> "C:\a", "C:\a" -> "C:\"), null for a root. Unlike
+        /// Path.GetDirectoryName it accepts paths of any length.</summary>
+        public static string ParentDir(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            string t = path.TrimEnd('\\');
+            int i = t.LastIndexOf('\\');
+            if (i < 0) return null;
+            if (i == 2 && t[1] == ':') return t.Substring(0, 3);
+            return i == 0 || (i == 1 && t[0] == '\\') ? null : t.Substring(0, i);
+        }
+
+        /// <summary>Last part of a path, for paths of any length.</summary>
+        public static string FileName(string path)
+        {
+            string t = (path ?? "").TrimEnd('\\');
+            int i = t.LastIndexOf('\\');
+            return i < 0 ? t : t.Substring(i + 1);
+        }
+
+        public static bool IsDirectory(string path)
+        {
+            uint a = GetAttributes(path);
+            return a != InvalidAttributes && (a & AttrDirectory) != 0;
+        }
+
         public static string Join(string dir, string name)
         {
             return dir.EndsWith("\\") ? dir + name : dir + "\\" + name;
