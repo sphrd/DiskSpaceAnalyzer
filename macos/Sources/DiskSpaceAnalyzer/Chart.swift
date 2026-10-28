@@ -162,7 +162,7 @@ final class PieChart: NSView {
         if h3 > 0 { Theme.drawText(l3, in: NSRect(x: inner.minX, y: ty + h1 + h2, width: inner.width, height: h3), font: Theme.font9, color: T.MUTED, align: .center) }
     }
 
-    private func hitTest(_ p: NSPoint) -> Int {
+    private func sliceAt(_ p: NSPoint) -> Int {
         if total <= 0 || pieRect.width <= 0 || logoMode || animating { return -1 }
         let dx = Double(p.x - pieRect.midX), dy = Double(p.y - pieRect.midY), dist = (dx * dx + dy * dy).squareRoot()
         if dist > Double(pieRect.width) / 2 + 6 || dist < Double(pieRect.width) * 0.29 { return -1 }
@@ -177,7 +177,7 @@ final class PieChart: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        let h = hitTest(convert(event.locationInWindow, from: nil))
+        let h = sliceAt(convert(event.locationInWindow, from: nil))
         if h >= 0 && slices[h].dir != nil { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
         if h != hover { hover = h; needsDisplay = true }
         if h != reported { reported = h; onHover?(h) }
@@ -190,7 +190,7 @@ final class PieChart: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        let h = hitTest(convert(event.locationInWindow, from: nil))
+        let h = sliceAt(convert(event.locationInWindow, from: nil))
         if h >= 0, slices[h].dir != nil { onClick?(slices[h]) }
     }
 }

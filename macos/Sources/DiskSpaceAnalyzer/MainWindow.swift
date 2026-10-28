@@ -32,10 +32,10 @@ struct Row {
 
 // MARK: - Table and outline subclasses
 
-/// Table with hover tracking (reported to the chart) and a set of rows highlighted from the chart.
+/// Table with hover tracking (reported to the chart) and a set of rows linkedRows from the chart.
 final class HoverTable: NSTableView {
     var hotRow = -1
-    var highlighted = Set<Int>()
+    var linkedRows = Set<Int>()
     var onHot: ((Int) -> Void)?
     var onKey: ((NSEvent) -> Bool)?
     var emptyText: String? { didSet { needsDisplay = true } }
@@ -58,13 +58,13 @@ final class HoverTable: NSTableView {
     override func mouseExited(with event: NSEvent) { setHot(-1) }
 
     func setHighlight(_ rows: [Int]) {
-        let old = highlighted
-        highlighted = Set(rows)
-        for i in old.union(highlighted) where i < numberOfRows { rowView(atRow: i, makeIfNecessary: false)?.needsDisplay = true }
+        let old = linkedRows
+        linkedRows = Set(rows)
+        for i in old.union(linkedRows) where i < numberOfRows { rowView(atRow: i, makeIfNecessary: false)?.needsDisplay = true }
         if let first = rows.min(), !rows.contains(where: { visibleRect.intersects(rect(ofRow: $0)) }) { scrollRowToVisible(first) }
     }
 
-    func resetHover() { hotRow = -1; highlighted = [] }
+    func resetHover() { hotRow = -1; linkedRows = [] }
 
     override func keyDown(with event: NSEvent) { if onKey?(event) != true { super.keyDown(with: event) } }
 
@@ -94,12 +94,12 @@ final class ListRowView: NSTableRowView {
         guard let t = table else { return }
         let r = bounds.insetBy(dx: 2, dy: 1)
         if !isSelected {
-            if t.highlighted.contains(index) { Theme.fillRound(r, 6, fill: T.BORDER, outline: T.ACCENT) }
+            if t.linkedRows.contains(index) { Theme.fillRound(r, 6, fill: T.BORDER, outline: T.ACCENT) }
             else if t.hotRow == index { Theme.fillRound(r, 6, fill: T.BORDER) }
         }
     }
     override func drawSelection(in dirtyRect: NSRect) {
-        let linked = table?.highlighted.contains(index) ?? false
+        let linked = table?.linkedRows.contains(index) ?? false
         let fill = isEmphasized ? T.ACCENT : T.BORDER
         Theme.fillRound(bounds.insetBy(dx: 2, dy: 1), 6, fill: fill, outline: linked && !isEmphasized ? T.ACCENT : fill)
     }
@@ -310,7 +310,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     private let driveLabel = NSTextField(labelWithString: "")
     private lazy var versionLink = LinkLabel("v" + Updater.currentString) { [unowned self] in self.updates.check(manual: true) }
     private let overlay = BusyOverlay()
-    private let menu = NSMenu()
+    private let contextMenu = NSMenu()
     lazy var updates = UpdateController(banner: banner)
     private var splitPositioned = false
 
@@ -391,7 +391,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         outline.dataSource = self; outline.delegate = self
         outline.target = self; outline.doubleAction = #selector(treeDoubleClick)
-        outline.menu = menu
+        outline.menu = contextMenu
         outline.onKey = { [unowned self] e in self.handleKey(e, in: self.outline) }
         styleScroll(treeScroll, outline)
         treeScroll.hasHorizontalScroller = false
@@ -436,8 +436,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         split.setHoldingPriority(NSLayoutConstraint.Priority(270), forSubviewAt: 2)
 
         // Context menu
-        menu.delegate = self
-        menu.appearance = NSAppearance(named: .darkAqua)
+        contextMenu.delegate = self
+        contextMenu.appearance = NSAppearance(named: .darkAqua)
 
         root.addSubview(overlay)
         overlay.isHidden = true
@@ -472,7 +472,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         t.allowsColumnReordering = true
         t.dataSource = self; t.delegate = self
         t.target = self; t.doubleAction = #selector(listDoubleClick)
-        t.menu = menu
+        t.menu = contextMenu
         t.onKey = { [unowned self] e in self.handleKey(e, in: t) }
     }
 
