@@ -9,6 +9,7 @@ enum Theme {
     static let font9 = NSFont.systemFont(ofSize: 11.5)
     static let font9Bold = NSFont.boldSystemFont(ofSize: 11.5)
     static let font11Bold = NSFont.boldSystemFont(ofSize: 14)
+    static let fontBold = NSFont.boldSystemFont(ofSize: 13)
 
     static func roundRect(_ r: NSRect, _ radius: CGFloat) -> NSBezierPath {
         NSBezierPath(roundedRect: r, xRadius: min(radius, r.width / 2, r.height / 2), yRadius: min(radius, r.width / 2, r.height / 2))
@@ -121,9 +122,19 @@ enum Fmt {
         return String(format: f, v) + " " + units[u]
     }
 
-    static func date(_ d: Date) -> String {
+    private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    static func date(_ d: Date) -> String { dateFormatter.string(from: d) }
+
+    /// Seconds since 1970 (0 = unknown: empty).
+    static func date(_ secs: Int64) -> String { secs > 0 ? date(Date(timeIntervalSince1970: TimeInterval(secs))) : "" }
+
+    static func day(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         return f.string(from: d)
     }
 
@@ -135,10 +146,14 @@ enum Fmt {
 
     static func pct(_ v: Double) -> String { String(format: "%.1f %%", v) }
 
-    static func count(_ n: Int64) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal
-        return f.string(from: NSNumber(value: n)) ?? "\(n)"
-    }
+    private static let countFormatter: NumberFormatter = { let f = NumberFormatter(); f.numberStyle = .decimal; return f }()
+
+    static func count(_ n: Int64) -> String { countFormatter.string(from: NSNumber(value: n)) ?? "\(n)" }
+
+    static func count(_ n: Int) -> String { count(Int64(n)) }
+
+    /// "+1.2 GB" / "-300 MB" / "-" for no change.
+    static func delta(_ d: Int64) -> String { d == 0 ? "-" : (d > 0 ? "+" : "-") + size(abs(d)) }
 }
 
 /// Flipped view with a solid background colour.
@@ -154,9 +169,10 @@ class PanelView: NSView {
     var radius: CGFloat = 12
     var panelFill: NSColor = T.SURFACE
     var outline: NSColor = T.BORDER
+    var backFill: NSColor = T.BG
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        T.BG.setFill(); bounds.fill()
+        backFill.setFill(); bounds.fill()
         Theme.fillRound(bounds, radius, fill: panelFill, outline: highlight ? T.ACCENT : outline)
     }
 }

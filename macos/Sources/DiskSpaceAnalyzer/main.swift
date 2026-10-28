@@ -5,19 +5,21 @@ import AppKit
 //   DiskSpaceAnalyzer <folder>             opens the window and scans <folder>
 //   DiskSpaceAnalyzer --cli scan <folder>  headless scan, prints totals (same format as the Windows exe)
 //   DiskSpaceAnalyzer --cli screenshot <out-folder> <folder>
-//                                          opens the window, scans, saves PNGs of the window and About (CI checks)
+//                                          opens the window, scans, saves a PNG of every view, About and the update window
+//   DiskSpaceAnalyzer --cli selftest <scratch-folder>
+//                                          end-to-end self-test of the real window; writes <scratch-folder>.log, exit code 0 = passed
 
 func headlessScan(_ path: String) -> Int32 {
     let full = (path as NSString).expandingTildeInPath
     let started = Date()
-    let s = Scanner(topCount: 10)
+    let s = Scanner()
     let root = s.run(full)
     let secs = Date().timeIntervalSince(started)
     print("")
-    print("\(root.name)\t\(root.size) bytes\t\(root.files) files\t\(root.dirs) dirs\t\(String(format: "%.3f", secs)) s")
+    print("\(root.name)\t\(root.bytes) bytes\t\(root.alloc) on disk\t\(root.files) files\t\(root.dirs) dirs\t\(String(format: "%.3f", secs)) s")
     for c in root.children {
         print("  " + c.name.padding(toLength: max(40, c.name.count), withPad: " ", startingAt: 0)
-              + " \(Fmt.count(c.size).leftPad(15)) bytes  \(Fmt.count(c.files).leftPad(10)) files")
+              + " \(Fmt.count(c.bytes).leftPad(15)) bytes \(Fmt.count(c.alloc).leftPad(15)) on disk \(Fmt.count(c.files).leftPad(10)) files")
     }
     return 0
 }
@@ -31,18 +33,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var about: AboutWindow?
     let initialPath: String?
     let screenshotDir: String?
+    let selfTestDir: String?
+    private var shots: ShotRun?
+    private var test: SelfTestRun?
 
-    init(initialPath: String?, screenshotDir: String?) { self.initialPath = initialPath; self.screenshotDir = screenshotDir }
+    init(initialPath: String?, screenshotDir: String?, selfTestDir: String? = nil) {
+        self.initialPath = initialPath; self.screenshotDir = screenshotDir; self.selfTestDir = selfTestDir
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Updater.cleanUp()
         NSApp.appearance = NSAppearance(named: .darkAqua)
         buildMenu()
         main = MainWindowController()
+        main.selfTestDir = selfTestDir
         main.showWindow(nil)
         main.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        if let dir = screenshotDir { runScreenshots(dir) }
+        if let dir = screenshotDir { startScreenshots(dir) }
+        if let dir = selfTestDir {
+            main.onScanFinished = { [weak self] in
+                guard let self = self, self.test == nil else { return }
+                self.main.onScanFinished = nil
+                let t = SelfTestRun(self.main, dir)
+                self.test = t
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { t.start() }
+            }
+        }
         main.start(initialPath: initialPath)
     }
 
@@ -91,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let file = sub("File")
         item(file, "Choose Folder...", #selector(chooseFolder(_:)), "o", target: self)
+        item(file, "Export...", #selector(MainWindowController.menuBarExport(_:)), "e", [.command, .shift])
+        file.addItem(.separator())
         item(file, "Close Window", #selector(NSWindow.performClose(_:)), "w")
 
         let edit = sub("Edit")
@@ -98,12 +117,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(edit, "Copy", #selector(NSText.copy(_:)), "c")
         item(edit, "Paste", #selector(NSText.paste(_:)), "v")
         item(edit, "Select All", #selector(NSText.selectAll(_:)), "a")
+        edit.addItem(.separator())
+        item(edit, "Find Files...", #selector(MainWindowController.menuBarFind(_:)), "f")
 
         let folder = sub("Folder")
         item(folder, "Up", #selector(MainWindowController.menuBarUp(_:)), String(UnicodeScalar(NSUpArrowFunctionKey)!))
         item(folder, "Rescan Folder", #selector(MainWindowController.menuBarRescan(_:)), "r")
         item(folder, "Show in Finder", #selector(MainWindowController.menuBarFinder(_:)), "r", [.command, .shift])
         folder.addItem(.separator())
+        item(folder, "Add to Delete List", #selector(MainWindowController.menuBarAddList(_:)), "d", [.command, .shift])
+        item(folder, "Move to Trash...", #selector(MainWindowController.menuBarTrash(_:)))
         item(folder, "Delete Permanently...", #selector(MainWindowController.menuBarDelete(_:)), "\u{8}")
 
         let window = sub("Window")
@@ -118,39 +141,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = bar
     }
 
-    // MARK: CI screenshots (no screen-recording permission needed: views render themselves into bitmaps)
+    // MARK: CI screenshots
 
-    private func save(_ view: NSView, _ path: String) {
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-        print("saved \(path)")
-    }
-
-    private func runScreenshots(_ dir: String) {
+    private func startScreenshots(_ dir: String) {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.save(self.main.window!.contentView!, dir + "/1-scanning.png") }
+        let run = ShotRun(self, dir)
+        shots = run
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { run.shot("0-scanning") }
         main.onScanFinished = { [weak self] in
             guard let self = self else { return }
             self.main.onScanFinished = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                self.save(self.main.window!.contentView!, dir + "/2-scanned.png")
-                // Hover the first chart slice to show the linked highlight in the list.
-                if !self.main.chart.slices.isEmpty { self.main.chart.onHover?(0); self.main.chart.setHover(0) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    self.save(self.main.window!.contentView!, dir + "/3-hover.png")
-                    self.showAbout(nil)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                        if let v = self.about?.window?.contentView { self.save(v, dir + "/4-about.png") }
-                        self.about?.close()
-                        self.main.updates.check(manual: true)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                            if let w = NSApp.windows.first(where: { $0.title == "Disk Space Analyzer - updates" }), let v = w.contentView { self.save(v, dir + "/5-update.png") }
-                            exit(0)
-                        }
-                    }
-                }
-            }
+            run.start()
         }
     }
 }
@@ -166,7 +167,18 @@ if args.count >= 2 && args[1] == "--cli" {
         app.run()
         exit(0)
     }
+    if args.count == 4 && args[2] == "selftest" {
+        let dir = SelfTest.prepare(args[3])
+        let app = NSApplication.shared
+        let d = AppDelegate(initialPath: dir, screenshotDir: nil, selfTestDir: dir)
+        app.delegate = d
+        app.setActivationPolicy(.regular)
+        app.run()
+        exit(0)
+    }
     print("Usage: DiskSpaceAnalyzer --cli scan <folder>")
+    print("       DiskSpaceAnalyzer --cli screenshot <out-folder> <folder>")
+    print("       DiskSpaceAnalyzer --cli selftest <scratch-folder>")
     exit(2)
 }
 

@@ -98,13 +98,30 @@ jobs:
           echo "$out" | grep -q 'bytes'
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "macos/build/Disk Space Analyzer.app/Contents/Info.plist"
 
+      - name: End-to-end self-test (live updates, delete list, Trash, duplicates, export)
+        timeout-minutes: 5
+        run: |
+          BIN="macos/build/Disk Space Analyzer.app/Contents/MacOS/DiskSpaceAnalyzer"
+          "$BIN" --cli selftest "$RUNNER_TEMP/dsa-selftest" &
+          pid=$!
+          for i in $(seq 1 180); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          if kill -0 $pid 2>/dev/null; then
+            kill $pid 2>/dev/null || true
+            cat "$RUNNER_TEMP/dsa-selftest.log" 2>/dev/null || true
+            echo "self-test timed out"; exit 1
+          fi
+          code=0; wait $pid || code=$?
+          echo "--- self-test log ---"
+          cat "$RUNNER_TEMP/dsa-selftest.log" || { echo "no self-test log"; exit 1; }
+          if [ "$code" != "0" ]; then echo "self-test failed (exit code $code)"; exit 1; fi
+
       - name: Window screenshots
         continue-on-error: true
         run: |
           BIN="macos/build/Disk Space Analyzer.app/Contents/MacOS/DiskSpaceAnalyzer"
           "$BIN" --cli screenshot "$RUNNER_TEMP/shots" /Applications &
           pid=$!
-          for i in $(seq 1 120); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          for i in $(seq 1 300); do kill -0 $pid 2>/dev/null || break; sleep 1; done
           kill $pid 2>/dev/null || true
           ls -la "$RUNNER_TEMP/shots" || true
 

@@ -163,12 +163,14 @@ final class TabStrip: NSView {
     private var hover = -1
     var selectedIndex = 0 { didSet { if oldValue != selectedIndex { needsDisplay = true; onChange?(selectedIndex) } } }
     var onChange: ((Int) -> Void)?
+    var background: NSColor = T.SURFACE
     override var isFlipped: Bool { true }
 
     init(_ titles: [String]) { self.titles = titles; super.init(frame: .zero) }
     required init?(coder: NSCoder) { fatalError() }
 
     func setTitle(_ i: Int, _ t: String) { titles[i] = t; needsDisplay = true }
+    override func resetCursorRects() { measure(); for r in rects { addCursorRect(r, cursor: .pointingHand) } }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -187,7 +189,7 @@ final class TabStrip: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        T.SURFACE.setFill(); bounds.fill()
+        background.setFill(); bounds.fill()
         measure()
         for (i, r) in rects.enumerated() {
             let c = i == selectedIndex ? T.ACCENT : i == hover ? T.FG : T.MUTED
