@@ -259,3 +259,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
   area. ~123 KB.
 - v1.5.0 (2026-10-28): self-update from GitHub releases (banner, download, checksum, swap, restart), Help menu with
   Check for updates and About (version, author sphrd). ~140 KB.
+- v1.6.0 (2026-10-28): About and Check for updates as items in the custom title bar next to the logo; every update
+  step shown in the About-style app dialog (no banner); first native macOS version (universal .dmg, Swift/AppKit).
