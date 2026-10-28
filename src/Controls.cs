@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -202,6 +203,71 @@ namespace DiskSpaceAnalyzer
         protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
         protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
 
+        // ---- hover linking with the pie chart
+
+        readonly HashSet<ListViewItem> highlighted = new HashSet<ListViewItem>();
+        ListViewItem hotItem;
+
+        /// <summary>Raised when the mouse moves onto another row (null when it leaves the rows).</summary>
+        public event Action<ListViewItem> HotItemChanged;
+
+        /// <summary>Rows linked to the hovered pie slice; scrolls the first one into view if none is visible.</summary>
+        public void SetHighlight(IEnumerable<ListViewItem> rows)
+        {
+            if (highlighted.Count == 0 && rows == null) return;
+            foreach (var it in highlighted) InvalidateRow(it);
+            highlighted.Clear();
+            if (rows == null) return;
+            ListViewItem first = null;
+            bool anyVisible = false;
+            foreach (var it in rows)
+            {
+                if (it.ListView != this) continue;
+                highlighted.Add(it);
+                if (first == null || it.Index < first.Index) first = it;
+                var b = GetItemRect(it.Index);
+                if (b.Bottom > 0 && b.Top < ClientSize.Height) anyVisible = true;
+                InvalidateRow(it);
+            }
+            if (first != null && !anyVisible) first.EnsureVisible();
+        }
+
+        void InvalidateRow(ListViewItem it)
+        {
+            if (it.ListView != this || it.Index < 0) return;
+            var b = GetItemRect(it.Index);
+            if (b.Bottom > 0 && b.Top < ClientSize.Height) Invalidate(new Rectangle(0, b.Y, ClientSize.Width, b.Height));
+        }
+
+        void SetHot(ListViewItem it)
+        {
+            if (it == hotItem) return;
+            var old = hotItem;
+            hotItem = it;
+            if (old != null) InvalidateRow(old);
+            if (it != null) InvalidateRow(it);
+            if (HotItemChanged != null) HotItemChanged(it);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            SetHot(GetItemAt(Theme.S(4), e.Y));
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            SetHot(null);
+        }
+
+        /// <summary>Forgets hover and highlight state; call before the rows are replaced.</summary>
+        public void ResetHover()
+        {
+            highlighted.Clear();
+            hotItem = null;
+        }
+
         protected override void OnDrawColumnHeader(DrawListViewColumnHeaderEventArgs e)
         {
             var g = e.Graphics;
@@ -225,11 +291,17 @@ namespace DiskSpaceAnalyzer
             var row = e.Bounds;
             using (var b = new SolidBrush(BackColor)) g.FillRectangle(b, row);
             bool strong = e.Item.Selected && Focused;
+            var rr = new Rectangle(row.X + Theme.S(2), row.Y + 1, row.Width - Theme.S(4), row.Height - 2);
+            bool linked = highlighted.Contains(e.Item);
             if (e.Item.Selected)
             {
                 Color fill = strong ? Theme.ACCENT : Theme.BORDER;
-                Theme.FillRound(g, new Rectangle(row.X + Theme.S(2), row.Y + 1, row.Width - Theme.S(4), row.Height - 2), Theme.S(6), fill, fill);
+                Theme.FillRound(g, rr, Theme.S(6), fill, linked && !strong ? Theme.ACCENT : fill);
             }
+            else if (linked)
+                Theme.FillRound(g, rr, Theme.S(6), Theme.BORDER, Theme.ACCENT);   // highlighted from the pie chart
+            else if (e.Item == hotItem)
+                Theme.FillRound(g, rr, Theme.S(6), Theme.BORDER, Theme.BORDER);
 
             var order = new ColumnHeader[Columns.Count];
             foreach (ColumnHeader c in Columns) order[c.DisplayIndex] = c;

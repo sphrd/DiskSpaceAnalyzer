@@ -76,11 +76,13 @@ namespace DiskSpaceAnalyzer
             BackColor = Theme.BG;
             ForeColor = Theme.FG;
             AutoScaleMode = AutoScaleMode.None;
-            // 1500x880 by default, shrunk to fit the working area of smaller screens.
+            // 1280x760 by default, at most 85 % of the working area so it always fits with room around it.
             var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
-            Size = new Size(Math.Min(S(1500), wa.Width - S(20)), Math.Min(S(880), wa.Height - S(20)));
-            MinimumSize = new Size(S(900), S(520));
-            StartPosition = FormStartPosition.CenterScreen;
+            Size = new Size(Math.Min(S(1280), wa.Width * 85 / 100), Math.Min(S(760), wa.Height * 85 / 100));
+            MinimumSize = new Size(Math.Min(S(900), wa.Width), Math.Min(S(520), wa.Height));
+            // Placed explicitly in the working area (CenterScreen put the window partly below the taskbar).
+            StartPosition = FormStartPosition.Manual;
+            Location = new Point(wa.X + (wa.Width - Width) / 2, wa.Y + (wa.Height - Height) / 2);
             KeyPreview = true;
             AllowDrop = true;
             Padding = new Padding(S(15), S(10), S(15), 0);
@@ -167,7 +169,12 @@ namespace DiskSpaceAnalyzer
             contents.SetColumns(new[] { "Name", "Size", "% of folder", "Files", "Folders", "Modified" },
                 new[] { "name", "size", "size", "files", "dirs", "mod" }, new[] { 320, 90, 170, 90, 80, 140 });
             contents.BarColumn = 2;
-            contents.ColumnClick += (s, e) => contents.SortBy(e.Column);
+            contents.ColumnClick += (s, e) => { contents.SortBy(e.Column); if (current != null) UpdateChart(current); };
+            contents.HotItemChanged += it =>
+            {
+                int i;
+                chart.SetHover(it != null && rowSlice.TryGetValue(it, out i) ? i : -1);
+            };
             contents.DoubleClick += (s, e) => OpenSelected();
             contents.Enter += (s, e) => lastView = contents;
 
@@ -201,7 +208,8 @@ namespace DiskSpaceAnalyzer
 
             // Pie chart pane (right). It is drawn from sizes already in memory, never from the disk.
             chart = new PieChart { Dock = DockStyle.Fill };
-            chart.SliceClicked += sl => { var d = sl.Tag as DirNode; if (d != null && !busy) SelectDir(d); };
+            chart.SliceClicked += sl => { if (sl.Dir != null && !busy) SelectDir(sl.Dir); };
+            chart.HoverChanged += i => contents.SetHighlight(i >= 0 && i < chart.Slices.Count ? chart.Slices[i].Rows : null);
             var chartPanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill };
             chartPanel.Controls.Add(chart);
             split2 = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = S(10), BackColor = Theme.BG, FixedPanel = FixedPanel.Panel2 };
@@ -269,8 +277,9 @@ namespace DiskSpaceAnalyzer
 
             Shown += (s, e) =>
             {
-                split.SplitterDistance = S(430);
-                split2.SplitterDistance = Math.Max(S(200), split2.Width - S(330) - split2.SplitterWidth);
+                // Tree and chart keep their preferred widths but give way on narrow windows, so the list stays usable.
+                split.SplitterDistance = Math.Min(S(430), split.Width * 30 / 100);
+                split2.SplitterDistance = Math.Max(S(200), split2.Width - Math.Min(S(330), split2.Width * 38 / 100) - split2.SplitterWidth);
                 LoadDrives();
                 RefreshTree(null);
                 // The system drive is analyzed automatically; other drives are listed and scanned on demand.
@@ -551,6 +560,7 @@ namespace DiskSpaceAnalyzer
             topFiles = r.Top;
             RefreshCapacity(r);
             if (!busy) pathBox.Text = r.Path;
+            contents.ResetHover();
             contents.Items.Clear();
             contents.EmptyText = r.Scanning
                 ? "Scanning " + r.DisplayName + "...\nThe results appear here when the scan finishes. You can browse other drives meanwhile."
@@ -565,54 +575,92 @@ namespace DiskSpaceAnalyzer
 
         // ---------------------------------------------------------------- pie chart
 
+        /// <summary>Folder contents row -> index of the pie slice that contains it.</summary>
+        readonly Dictionary<ListViewItem, int> rowSlice = new Dictionary<ListViewItem, int>();
+        const int MaxOwnSlices = 12;          // at most this many rows get a slice of their own...
+        const double MinOwnShare = 0.015;     // ...and only if they hold at least 1.5 % of the folder
+
+        /// <summary>
+        /// Builds the pie from the folder contents list exactly as displayed: one slice per row in row order, except
+        /// that runs of consecutive small rows are merged into one "smaller items" slice. A drive root also gets
+        /// "System / not readable" and "Free space" at the end.
+        /// </summary>
         void UpdateChart(DirNode d)
         {
+            rowSlice.Clear();
             var r = RootOf(d.Top);
             if (r != null) RefreshCapacity(r);
-            var slices = new List<ChartSlice>();
-            long dirsTotal = 0, shown = 0;
-            if (d.Children != null)
-                foreach (var c in d.Children)
-                {
-                    dirsTotal += c.Size;
-                    if (slices.Count < 6 && c.Size > 0)
-                    {
-                        slices.Add(new ChartSlice { Label = c.Name, Size = c.Size, Color = Theme.CHART[slices.Count % Theme.CHART.Length], Tag = c });
-                        shown += c.Size;
-                    }
-                }
-            if (dirsTotal - shown > 0) slices.Add(new ChartSlice { Label = "Other folders", Size = dirsTotal - shown, Color = Theme.CHART_OTHER });
-            if (d.LocalSize > 0) slices.Add(new ChartSlice { Label = "Files in this folder", Size = d.LocalSize, Color = Theme.CHART_FILES });
+            var rows = contents.Items.Cast<ListViewItem>().Where(it => it.Tag is ItemInfo).ToList();
+            long folder = Math.Max(1, d.Size);
 
-            bool driveRoot = d.Parent == null && r != null && r.IsDrive && r.Total > 0;
+            var own = new HashSet<ListViewItem>(rows
+                .Where(it => ((ItemInfo)it.Tag).Size > 0 && ((ItemInfo)it.Tag).Size >= MinOwnShare * folder)
+                .OrderByDescending(it => ((ItemInfo)it.Tag).Size)
+                .Take(MaxOwnSlices));
+
+            var slices = new List<ChartSlice>();
+            var runs = new List<ChartSlice>();
+            ChartSlice run = null;
+            int colour = 0;
+            foreach (var it in rows)
+            {
+                var info = (ItemInfo)it.Tag;
+                if (own.Contains(it))
+                {
+                    run = null;
+                    var s = new ChartSlice
+                    {
+                        Label = info.Name, Size = info.Size, Color = Theme.CHART[colour++ % Theme.CHART.Length],
+                        Detail = string.Format("{0:0.0} % of folder", 100.0 * info.Size / folder),
+                        Dir = info.IsDir ? info.Dir : null
+                    };
+                    s.Rows.Add(it);
+                    slices.Add(s);
+                }
+                else
+                {
+                    if (run == null) { run = new ChartSlice { Color = Theme.CHART_OTHER }; slices.Add(run); runs.Add(run); }
+                    run.Rows.Add(it);
+                    run.Size += info.Size;
+                }
+                rowSlice[it] = slices.Count - 1;
+            }
+            foreach (var s in runs)
+            {
+                s.Label = s.Rows.Count == 1 ? ((ItemInfo)s.Rows[0].Tag).Name : string.Format("{0:N0} smaller items", s.Rows.Count);
+                s.Detail = string.Format("{0:0.0} % of folder", 100.0 * s.Size / folder);
+            }
+
             string title = d.Parent == null && r != null ? r.DisplayName : d.Name, sub = d.FullPath;
-            if (driveRoot)
+            if (d.Parent == null && r != null && r.IsDrive && r.Total > 0)
             {
                 long used = r.Total - r.Free;
                 if (used - d.Size > 0)
-                    slices.Add(new ChartSlice { Label = "System / not readable", Size = used - d.Size, Color = Theme.PILL });
-                slices.Add(new ChartSlice { Label = "Free space", Size = r.Free, Color = Theme.CHART_FREE });
-                sub = string.Format("{0} used of {1}", Fmt.Size(used), Fmt.Size(r.Total));
+                    slices.Add(new ChartSlice
+                    {
+                        Label = "System / not readable", Size = used - d.Size, Color = Theme.PILL,
+                        Detail = string.Format("{0:0.0} % of drive", 100.0 * (used - d.Size) / r.Total)
+                    });
+                slices.Add(new ChartSlice
+                {
+                    Label = "Free space", Size = r.Free, Color = Theme.CHART_FREE, Empty = true,
+                    Detail = string.Format("{0:0.0} % of drive", 100.0 * r.Free / r.Total)
+                });
+                sub = string.Format("{0} used of {1}  -  {2} free", Fmt.Size(used), Fmt.Size(r.Total), Fmt.Size(r.Free));
             }
-            if (r != null && r.Total > 0)
-                chart.SetData(title, sub, slices,
-                    string.Format("{0}  {1} here  -  {2} free of {3}", Path.GetPathRoot(r.Path), Fmt.Size(d.Size), Fmt.Size(r.Free), Fmt.Size(r.Total)),
-                    r.Total, r.Free, d.Size);
-            else
-                chart.SetData(title, sub, slices, "", 0, 0, 0);
+            chart.SetData(title, sub, slices);
         }
 
+        /// <summary>Nothing scanned yet: the chart pane shows the app logo; it morphs into the chart once the scan is done.</summary>
         void UpdateChartUnscanned(ScanRoot r)
         {
-            if (r.Total <= 0) { chart.SetData(r.DisplayName, "Not scanned", new List<ChartSlice>(), "", 0, 0, 0); return; }
-            long used = r.Total - r.Free;
-            var slices = new List<ChartSlice>
-            {
-                new ChartSlice { Label = "Used (not scanned yet)", Size = used, Color = Theme.CHART[0] },
-                new ChartSlice { Label = "Free space", Size = r.Free, Color = Theme.CHART_FREE }
-            };
-            chart.SetData(r.DisplayName, string.Format("{0} used of {1}  -  {2}", Fmt.Size(used), Fmt.Size(r.Total), r.Scanning ? "scanning..." : "not scanned"), slices,
-                "", 0, 0, 0);
+            rowSlice.Clear();
+            string sub = r.Total > 0
+                ? string.Format("{0} used of {1}  -  {2} free", Fmt.Size(r.Total - r.Free), Fmt.Size(r.Total), Fmt.Size(r.Free))
+                : r.Path;
+            chart.ShowLogo(r.DisplayName, sub, r.Scanning
+                ? "Scanning... the chart appears when the scan is done."
+                : "Not scanned yet. Press Scan, or double-click the drive.");
         }
 
         /// <summary>Blocking work (permanent delete): full-window overlay.</summary>
@@ -880,7 +928,6 @@ namespace DiskSpaceAnalyzer
                 if (!busy) pathBox.Text = r.Path;
             }
             contents.EmptyText = null;
-            UpdateChart(d);
             var items = new List<ItemInfo>();
             if (d.Children != null) foreach (var c in d.Children) items.Add(ItemInfo.ForDir(c, d.Size));
             var files = Scanner.ListFiles(d);
@@ -899,6 +946,7 @@ namespace DiskSpaceAnalyzer
             items.Sort(contents.Sorter.Compare);
 
             contents.BeginUpdate();
+            contents.ResetHover();
             contents.Items.Clear();
             contents.Items.AddRange(items.Select(it =>
             {
@@ -912,6 +960,7 @@ namespace DiskSpaceAnalyzer
                 return lvi;
             }).ToArray());
             contents.EndUpdate();
+            UpdateChart(d);
 
             tabs.SetTitle(0, "Folder contents: " + Fmt.Shorten(d.Name, 40) + "  (" + Fmt.Size(d.Size) + ")");
             UpdateButtons();

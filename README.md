@@ -34,11 +34,14 @@ single-file GUI.
 - **Size tree** of drives, folders and subfolders with aligned **Size** and
   **% of parent** columns plus a percentage bar; the contents list adds
   file/folder counts and is sortable by any column.
-- **Pie chart pane** for the selected drive or folder: its biggest subfolders,
-  the files directly in it, and for a drive the space taken by system/unreadable
-  files and the **free space**. A capacity bar shows the drive's used and free
-  space for any selection. Click a slice to open that folder. The chart is
-  drawn from the sizes already in memory, so it never slows the scan.
+- **Pie chart pane** for the selected drive or folder. Its slices follow the
+  folder contents list row for row, in the same order (also after you re-sort
+  the list); small rows next to each other are merged into one "smaller items"
+  slice. For a drive it adds the space taken by system/unreadable files and the
+  **free space**. Hover a slice to highlight its row (or all the rows of a
+  merged slice) in the list; hover a row to highlight its slice. Click a slice
+  to open that folder. The chart is drawn from the sizes already in memory, so
+  it never slows the scan.
 - **Folder contents** pane with owner-drawn percentage bars, plus a
   **Largest files (top 1000)** tab to find big files anywhere in the tree.
 - **Permanent delete** (bypasses the Recycle Bin) of files and folders, with a

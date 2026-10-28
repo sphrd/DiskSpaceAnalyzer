@@ -13,7 +13,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 | Theme tokens (palette, fonts), drawing helpers, DWM interop | `src/Theme.cs` |
 | Widgets: RoundButton, RoundedPanel, PathInput, TabStrip, PillScrollBar, ScrollHost, BusyOverlay, Spinner, ScanBar, DarkRenderer, DarkTreeView, TreeHeader | `src/Widgets.cs` |
 | List view (rows, bars, header, empty-state hint) + sorting | `src/Controls.cs` |
-| Pie chart pane (donut, legend, capacity bar) | `src/Chart.cs` |
+| Pie chart pane (donut linked to the contents list) | `src/Chart.cs` |
 | Scanner / deleter / interop (domain, not UI) | `src/Scanner.cs`, `src/Deleter.cs`, `src/Native.cs` |
 | Asset generator (icon `.ico`, 256 px `app.png` for the README, 1280x640 `social-preview.png` for GitHub) | `tools/make_icon.ps1` (run by every build) |
 | Build script | `build.ps1` -> compiles into `bin/`, moves `DiskSpaceAnalyzer.exe` to the repo root (git-ignored), deletes `bin/` |
@@ -23,10 +23,15 @@ patterns (Part 3) are applied through the WinForms mapping below.
 
 - Name: Disk Space Analyzer. Repo: `sphrd/DiskSpaceAnalyzer`. License: MIT.
 - AppUserModelID: `sphrd.DiskSpaceAnalyzer`.
-- Icon concept: **accent tile with a pie chart shaped like Pac-Man facing left = disk usage analyzer that frees space.**
-  One circle (same centre and radius) split only by colour: white right half, upper-left `accent-light` (#cfe4ff),
-  lower-left `#a6cfff` (icon-only shade between accent-light and accent-active, requested by the user), mouth on the left.
-  No gaps: the left sections run a few degrees under the white half so shared edges blend colour into colour. 3 elements, checked at 16 / 24 / 32 / 48 / 256 px.
+- Icon concept: **a pie chart shaped like Pac-Man facing left = disk usage analyzer that frees space.** No tile
+  (transparent background) everywhere: exe/window/taskbar icon, README logo, social preview and the in-app logo.
+  One circle split by colour, shading dark -> light from top left via the right half to bottom left: upper-left
+  `#3d6bcc`, right half `#5e88e6`, lower-left `#81a2eb` (tuned by the user from Tailwind CSS blue 800 / 600 / 400), mouth on the left; the left
+  sections run a few degrees under the right half, so there are no seams. Checked at 16 / 24 / 32 / 48 / 256 px on dark
+  and light backgrounds.
+- **Logo colours are edited in one place: the `LOGO_TOP_LEFT` / `LOGO_RIGHT` / `LOGO_BOTTOM_LEFT` lines in
+  `src/Theme.cs`.** `tools/make_icon.ps1` reads them (and all other colours it uses) from `Theme.cs`, so `build.ps1`
+  regenerates the exe icon, `assets/app.png` and `assets/social-preview.png` to match the in-app logo.
 - Primary action: **Scan**. Destructive action: **Delete permanently** (warn kind, amber).
 - Domain status strings: `Scanning: <n> folders, <n> files, <size> so far` (no known total, so no `i/n`),
   `Cancelling... (finishing current folder)`, `Deleting: <n> files removed`, detail line = current path (muted).
@@ -60,6 +65,25 @@ patterns (Part 3) are applied through the WinForms mapping below.
   description as well."
 - 2026-10-27: "the scan should not block the page. it should run with a bar on the top of app showing the progress and
   scan data."
+- 2026-10-28: "the right pane should only have the pie chart and not the list below it. thats redundant. instead when
+  hovering on the pie chart sectors the app should highlight the path in the middle pane, and vice versa. the pie chart
+  should represent the middle pane exactly by its order. when categorizing them as others (small files) it should
+  highlight multiple items that belong there."
+- 2026-10-28: "make the free space section fo the chart, empty. align it always in a way that the mid line of the free pie
+  section, is aligned with the vertical line and is at the top."
+- 2026-10-28: "remove the dashed line. there should be nothing. dont show the chart before scan is done. or show the app
+  logo and then transform animation into the chart."
+- 2026-10-28: "put the logo wihtout th ebackground, and the circle of the logo should be aligned with the charts position and
+  size. put the free space section where it was, on the left of the top vertical line."
+- 2026-10-28: "change the colors of the logo's circle. make them darker blue. put the color of thebottom left arc into the
+  right hald circle, and the color of the icon background to the two left side arcs. remove the icon backgroun as well
+  everywhere (only the reverse pacman)"
+- 2026-10-28: "no, make the right one a darker blue, top left one darker than that, and bottom left one, lighter than the
+  right one. so like a shade going from top left to bottom left from dark blue to light blue. use mainstream good
+  looking shades. point out where i can adjust colors manually"
+- 2026-10-28: "reduce the default app size. it doesnt fit in my screen." (1920x1080 at 125 %: 1500x880 became
+  1875x995 px and `CenterScreen` pushed it below the taskbar.)
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -80,14 +104,23 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - Tree top level = one node per local drive (system drive first) plus scanned folders (`ScanRoot`). The system drive
   is scanned at startup; other drives show used space from the volume and are scanned on Scan / double-click / Enter.
 - Tree `% of parent` column has a 44 px pill bar; for a scanned drive root it is the share of the drive capacity.
-- Pie chart pane (right, 330 px, fixed): donut of the selection's 6 biggest subfolders + other folders + files in
-  the folder; for a drive root also "System / not readable" (used - scanned) and "Free space". Capacity bar below for
-  any selection. Chart colours are data-only tokens in `Theme.CHART*` (accent shades + greys), allowed by §2.1.
+- Pie chart pane (right, 330 px, fixed) holds only the title (selection + path, or used/total/free for a drive) and the
+  donut; the centre shows the hovered slice (name, size, share) or the total. Slices mirror the folder contents list
+  exactly, in its current row order (rebuilt after every fill and re-sort): up to 12 rows of at least 1.5 % of the
+  folder get their own slice (accent shades); runs of consecutive smaller rows merge into one grey "N smaller items"
+  slice. A drive root appends "System / not readable" (used - scanned) and "Free space". Free space is an empty
+  gap (nothing drawn; a faint `border` fill only while hovered). Slices start at 12 o'clock and run clockwise, so the
+  free gap (last) always ends at 12 o'clock, just left of the top vertical line.
+- No chart before a scan: an unscanned or scanning drive shows the app logo (only the Pac-Man pie, `LOGO_*` colours) on exactly the chart's circle, plus a muted note. When the scan finishes, the logo fades out on
+  that circle while the chart sweeps in clockwise from 12 o'clock and the hole opens (650 ms, ease-out). Hover is off during the morph. This is the only animation besides the
+  spinners (allowed by §2.1 as a one-off transition; recorded here as a project decision). Hover is linked both ways:
+  slice -> its row(s) get an accent outline in the list (scrolled into view if none is visible); list row -> its slice
+  pops out. Chart colours are data-only tokens in `Theme.CHART*` (accent shades + greys), allowed by §2.1.
 - Message boxes and the folder picker stay OS-styled (accepted by §2.1).
 
 ## Deviations from the agent file (kept to preserve existing behavior)
 
-- Window opens at 1500x880 (shrunk to the screen's working area; min 900x520), approved by the user. The app is a
+- Window opens at 1280x760 (at most 85 % of the screen's working area, centred in it; min 900x520). The app is a
   three-pane explorer, not the single-column form of §2.5. Layout: toolbar (path row + action row), scan bar (while
   scanning), tree | list | chart panels, status line.
 - The path box is editable (type a path + Enter), so only its chevron opens the drive list, not the whole box.
@@ -99,6 +132,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
 
 ## Decisions and gotchas
 
+- Window placement: `FormStartPosition.CenterScreen` opened the window off-centre with its bottom under the taskbar
+  (y 224..1083 on a 1020 px working area). The form now sets `StartPosition = Manual` and centres itself in the working
+  area of the screen under the cursor. Check placement with `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`.
+
 - Mapped network drives are not listed: `DriveInfo.IsReady` on a disconnected share can block for seconds. A network
   path can still be typed and scanned. Drives are re-read on `WM_DEVICECHANGE` (arrival / removal), deferred while a
   scan or delete runs.
@@ -106,7 +143,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
   copy of the rescanned tree is mapped onto the new one by path (`FindByPath`); another drive stays selected.
   Model updates (`ReplaceNode` etc.) use the largest-files list of the root that owns the node (`TopOf`), not the
   active one, because the user may have switched drives during a background rescan.
-- Chart legend: the donut shrinks so every legend row fits (`Free space` is last and must stay visible).
+- Chart hover state is two values: `hover` (what is drawn, also set from the list) and `reported` (last slice sent
+  through `HoverChanged`). With one shared value, a list hover that set the slice first swallowed the chart's own
+  hover event, and the list highlight never appeared.
 - Startup: the window shows in ~0.3 s warm. The first start of a freshly built exe takes 2-10 s while Windows
   Defender inspects the new file; that is not app work.
 - Full C: scan (~870k files, 203k folders) took 10 s on an idle machine and 20-35 s under load; the old and new
@@ -157,3 +196,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - v1.3.0 (2026-10-27): auto-scan of the system drive at startup, background scan with progress bar, all local drives
   in the tree (others scanned on demand), percentage bars in the tree, pie chart pane with free space, 1500x880 window,
   smooth Pac-Man icon. ~117 KB.
+- v1.4.0 (2026-10-28): pie chart pane is only the donut, linked by hover to the contents list in both directions and
+  ordered like the list (small rows merged); free space is an empty gap ending at 12 o'clock; app logo shown before a
+  scan and morphing into the chart; tile-less shaded logo everywhere; default window 1280x760, centred in the working
+  area. ~123 KB.

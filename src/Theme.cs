@@ -18,6 +18,13 @@ namespace DiskSpaceAnalyzer
         public static readonly Color DISABLED_FG = Hex(0x6b7480);
         public static readonly Color ACCENT = Hex(0x4da3ff);
         public static readonly Color ACCENT_ACTIVE = Hex(0x7bbcff);
+        public static readonly Color ACCENT_LIGHT = Hex(0xcfe4ff);
+        // ---- LOGO COLOURS: edit here. This is the only place; tools/make_icon.ps1 reads these three lines for the
+        // exe icon, README logo and social preview, so rebuild (build.ps1) after changing them.
+        // Shade runs dark -> light: top left, right half, bottom left (Tailwind CSS blue 800 / 600 / 400).
+        public static readonly Color LOGO_TOP_LEFT = Hex(0x3d6bcc);
+        public static readonly Color LOGO_RIGHT = Hex(0x5e88e6);
+        public static readonly Color LOGO_BOTTOM_LEFT = Hex(0x81a2eb);
         public static readonly Color WARN = Hex(0xe0a030);
         public static readonly Color WARN_FG = Hex(0xffd27a);
         public static readonly Color PILL = Hex(0x5c6470);
@@ -27,7 +34,6 @@ namespace DiskSpaceAnalyzer
         // plus greys for "free space" and catch-all slices.
         public static readonly Color[] CHART = { Hex(0x4da3ff), Hex(0xa6cfff), Hex(0x2f78cc), Hex(0x7bbcff), Hex(0x1f5aa0), Hex(0xcfe4ff), Hex(0x5b95d6), Hex(0x8fb8e8) };
         public static readonly Color CHART_FREE = Hex(0x4a525e);
-        public static readonly Color CHART_FILES = Hex(0x8a94a0);
         public static readonly Color CHART_OTHER = Hex(0x6b7480);
 
         public static readonly Font FONT = new Font("Segoe UI", 10f);

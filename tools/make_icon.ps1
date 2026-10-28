@@ -1,24 +1,38 @@
-# Generates assets\app.ico (16-256 px, PNG-compressed) and assets\app.png (256 px) following the
-# design language: ACCENT rounded tile (radius 22 %) with a pie chart shaped like Pac-Man facing left: FG half disc on the
-# right, two smaller sections on the left (ACCENT_LIGHT above, ACCENT_MID below). Drawn at 4x and downscaled.
+# Generates assets\app.ico (16-256 px, PNG-compressed), assets\app.png (256 px) and assets\social-preview.png.
+# The logo is only the pie chart shaped like Pac-Man facing left, on a transparent background (no tile): one circle
+# split by colour into an upper-left section, a right half and a lower-left section, mouth on the left.
+# Drawn at 4x and downscaled.
+#
+# The logo colours are NOT set here: they are read from the LOGO_* lines in src\Theme.cs (the single place to edit
+# them), so the exe icon, the README logo, the social preview and the in-app logo always match.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$ACCENT = [System.Drawing.ColorTranslator]::FromHtml('#4da3ff')
-$ACCENT_LIGHT = [System.Drawing.ColorTranslator]::FromHtml('#cfe4ff')
-$ACCENT_MID = [System.Drawing.ColorTranslator]::FromHtml('#a6cfff')   # icon-only shade between accent-light and accent-active (user request)
-$FG = [System.Drawing.ColorTranslator]::FromHtml('#ffffff')
-$BG = [System.Drawing.ColorTranslator]::FromHtml('#222831')
-
-function New-RoundPath([float]$x, [float]$y, [float]$w, [float]$h, [float]$r) {
-    $p = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $d = 2 * $r
-    $p.AddArc($x, $y, $d, $d, 180, 90); $p.AddArc($x + $w - $d, $y, $d, $d, 270, 90)
-    $p.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90); $p.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
-    $p.CloseFigure()
-    return $p
+function Get-ThemeColor([string]$name) {
+    $theme = Get-Content (Join-Path $PSScriptRoot '..\src\Theme.cs') -Raw
+    $m = [regex]::Match($theme, "\b$name\s*=\s*Hex\(0x([0-9a-fA-F]{6})\)")
+    if (-not $m.Success) { throw "Colour $name not found in src\Theme.cs" }
+    return [System.Drawing.ColorTranslator]::FromHtml('#' + $m.Groups[1].Value)
 }
 
+$LOGO_TOP_LEFT = Get-ThemeColor 'LOGO_TOP_LEFT'
+$LOGO_RIGHT = Get-ThemeColor 'LOGO_RIGHT'
+$LOGO_BOTTOM_LEFT = Get-ThemeColor 'LOGO_BOTTOM_LEFT'
+$ACCENT = Get-ThemeColor 'ACCENT'
+$FG = Get-ThemeColor 'FG'
+$BG = Get-ThemeColor 'BG'
+
+# Draws the logo pie into a square of side $n at ($x, $y) on graphics $g.
+function Draw-Logo($g, [float]$x, [float]$y, [float]$n) {
+    $R = 0.47 * $n                                # nearly the full canvas, small margin for anti-aliasing
+    $cx = $x + 0.5 * $n; $cy = $y + 0.5 * $n
+    $mouth = 30                                   # half-angle of the mouth, degrees
+    $under = 6                                    # left sections run under the right half: no seam between colours
+    $L = $cx - $R; $T = $cy - $R; $D = 2 * $R
+    $g.FillPie((New-Object System.Drawing.SolidBrush $LOGO_TOP_LEFT), $L, $T, $D, $D, 180 + $mouth, 90 - $mouth + $under)
+    $g.FillPie((New-Object System.Drawing.SolidBrush $LOGO_BOTTOM_LEFT), $L, $T, $D, $D, 90 - $under, 90 - $mouth + $under)
+    $g.FillPie((New-Object System.Drawing.SolidBrush $LOGO_RIGHT), $L, $T, $D, $D, -90, 180)
+}
 function New-IconBitmap([int]$size) {
     $n = 4 * $size
     $big = New-Object System.Drawing.Bitmap $n, $n
@@ -26,20 +40,7 @@ function New-IconBitmap([int]$size) {
     $g.SmoothingMode = 'AntiAlias'
     $g.PixelOffsetMode = 'HighQuality'
     $g.Clear([System.Drawing.Color]::Transparent)
-    $g.FillPath((New-Object System.Drawing.SolidBrush $ACCENT), (New-RoundPath 0 0 $n $n (0.22 * $n)))
-
-    # Pie chart, Pac-Man facing left: one circle (single centre and radius) split only by colour into an FG
-    # right half, an ACCENT_LIGHT upper-left section and an ACCENT_MID lower-left section, with the mouth on the left.
-    # The left sections are drawn first and run a few degrees under the half disc, so the shared edges blend
-    # colour into colour (no seam of tile colour between the slices).
-    $cx = 0.5 * $n; $cy = 0.5 * $n
-    $R = 0.32 * $n
-    $mouth = 30                                   # half-angle of the mouth, degrees
-    $under = 6                                    # degrees each section runs underneath the half disc
-    $box = @(($cx - $R), ($cy - $R), (2 * $R), (2 * $R))
-    $g.FillPie((New-Object System.Drawing.SolidBrush $ACCENT_LIGHT), $box[0], $box[1], $box[2], $box[3], 180 + $mouth, 90 - $mouth + $under)
-    $g.FillPie((New-Object System.Drawing.SolidBrush $ACCENT_MID), $box[0], $box[1], $box[2], $box[3], 90 - $under, 90 - $mouth + $under)
-    $g.FillPie((New-Object System.Drawing.SolidBrush $FG), $box[0], $box[1], $box[2], $box[3], -90, 180)
+    Draw-Logo $g 0 0 $n
     $g.Dispose()
 
     $bmp = New-Object System.Drawing.Bitmap $size, $size
@@ -52,7 +53,6 @@ function New-IconBitmap([int]$size) {
     $g.Dispose(); $big.Dispose()
     return $bmp
 }
-
 function Get-PngBytes($bmp) {
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -87,8 +87,8 @@ $bw.Close()
 Write-Host "Wrote $out"
 
 # Social preview card (GitHub repo settings > Social preview, 1280x640): logo, name and tagline on the bg colour.
-$MUTED = [System.Drawing.ColorTranslator]::FromHtml('#aab4c0')
-$SURFACE = [System.Drawing.ColorTranslator]::FromHtml('#2d333d')
+$MUTED = Get-ThemeColor 'MUTED'
+$SURFACE = Get-ThemeColor 'SURFACE'
 $card = New-Object System.Drawing.Bitmap 1280, 640
 $g = [System.Drawing.Graphics]::FromImage($card)
 $g.SmoothingMode = 'AntiAlias'; $g.InterpolationMode = 'HighQualityBicubic'; $g.TextRenderingHint = 'AntiAliasGridFit'
