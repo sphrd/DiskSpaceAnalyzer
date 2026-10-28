@@ -182,32 +182,55 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     }
 }
 
-/// Update flow in the banner: offer, download with progress and Cancel, install, restart.
+/// Update flow in the update window (same frame as About): checking, up to date, update available, downloading with
+/// progress and Cancel, installed with Restart now, and the error cases. Automatic checks stay silent unless there is
+/// an update; manual checks always open the window.
 final class UpdateController {
-    private let banner: Banner
+    private weak var parent: NSWindow?
+    private var window: UpdateWindow?
     private var release: ReleaseInfo?
     private var checking = false
     private var downloading = false
     private var cancelFlag = false
     var canRestart: () -> Bool = { true }
 
-    init(banner: Banner) { self.banner = banner }
+    init(parent: NSWindow?) { self.parent = parent }
+
+    private func show() -> UpdateWindow {
+        let w = window ?? {
+            let n = UpdateWindow()
+            n.onClose = { [weak self] in self?.cancelFlag = true; self?.window = nil }
+            window = n
+            return n
+        }()
+        w.present(over: parent)
+        return w
+    }
+
+    private func closeWindow() { window?.close() }
 
     func check(manual: Bool) {
-        if checking || downloading { return }
+        if checking || downloading { if manual { _ = show() }; return }
         checking = true
-        if manual { banner.show("Checking for updates...", []) }
+        if manual { show().setStep("Checking for updates...", "Looking for the latest release on GitHub.", [("Close", closeWindow)]) }
         DispatchQueue.global(qos: .utility).async {
             let result = Result { try Updater.latest() }
             DispatchQueue.main.async {
                 self.checking = false
+                if manual && self.window == nil { return }                     // closed while checking
                 switch result {
                 case .failure(let e):
-                    if manual { self.banner.show("Could not check for updates: \(e.localizedDescription).", [("Open download page", .warn, self.openPage), ("Close", .secondary, self.banner.dismiss)]) }
+                    if manual {
+                        self.show().setStep("Update check failed", "Could not check for updates: \(e.localizedDescription).",
+                                            [("Close", self.closeWindow), ("Open download page", self.openPage)])
+                    }
                 case .success(let r):
                     self.release = r
                     if !Updater.newer(r.version, than: Updater.current) {
-                        if manual { self.banner.show("You have the latest version (\(Updater.currentString)).", [("Close", .warn, self.banner.dismiss)]) }
+                        if manual {
+                            self.show().setStep("You're up to date", "Version \(Updater.currentString) is the latest version.",
+                                                [("Close", self.closeWindow), ("What's new", self.openPage)])
+                        }
                     } else { self.offer() }
                 }
             }
@@ -217,8 +240,11 @@ final class UpdateController {
     private func offer() {
         guard let r = release else { return }
         let msg = "Version \(Updater.short(r.version)) is available -- you have \(Updater.currentString)."
-        if r.assetURL == nil { banner.show(msg, [("Open download page", .warn, openPage), ("Later", .secondary, banner.dismiss)]) }
-        else { banner.show(msg, [("Update now", .warn, startUpdate), ("What's new", .secondary, openPage), ("Later", .secondary, banner.dismiss)]) }
+        if r.assetURL == nil {
+            show().setStep("Update available", msg, [("Open download page", openPage), ("Later", closeWindow)])
+        } else {
+            show().setStep("Update available", msg, [("Update now", startUpdate), ("What's new", openPage), ("Later", closeWindow)])
+        }
     }
 
     private func openPage() { NSWorkspace.shared.open(release?.pageURL ?? Updater.releasesPage) }
@@ -226,13 +252,14 @@ final class UpdateController {
     private func startUpdate() {
         guard let r = release else { return }
         if !Updater.folderWritable() {
-            banner.show("This copy of the app can't replace itself here (move it to Applications first) -- or download the update from the release page.",
-                        [("Open download page", .warn, openPage), ("Later", .secondary, banner.dismiss)])
+            show().setStep("Can't update here", "This copy can't replace itself (move it to Applications first) -- or download the update from the release page.",
+                           [("Open download page", openPage), ("Later", closeWindow)])
             return
         }
         downloading = true; cancelFlag = false
-        let label = "Downloading version \(Updater.short(r.version))"
-        banner.show(label + "...", [("Cancel", .secondary, { self.cancelFlag = true })])
+        let label = "Version \(Updater.short(r.version))"
+        let w = show()
+        w.setStep("Downloading update", label + "...", progress: 0, [("Cancel", { [weak self] in self?.cancelFlag = true })])
         var last = Date.distantPast
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { () -> Void in
@@ -240,7 +267,8 @@ final class UpdateController {
                     if Date().timeIntervalSince(last) < 0.1 && done < total { return }
                     last = Date()
                     let t = total > 0 ? "\(label): \(Fmt.size(done)) of \(Fmt.size(total)) (\(Int(100 * Double(done) / Double(total))) %)" : "\(label): \(Fmt.size(done))"
-                    DispatchQueue.main.async { self.banner.text = t }
+                    let f = total > 0 ? Double(done) / Double(total) : 0
+                    DispatchQueue.main.async { self.window?.setProgress(t, f) }
                 }, cancelled: { self.cancelFlag })
                 if self.cancelFlag { throw NSError(domain: "update", code: -999) }
                 try Updater.install(file)
@@ -249,21 +277,22 @@ final class UpdateController {
                 self.downloading = false
                 switch result {
                 case .failure(let e as NSError) where e.code == -999:
-                    Updater.cleanUp(); self.offer()
+                    Updater.cleanUp()
+                    if self.window != nil { self.offer() }
                 case .failure(let e):
                     Updater.cleanUp()
-                    self.banner.show("Update failed: \(e.localizedDescription). You can download it from the release page.",
-                                     [("Open download page", .warn, self.openPage), ("Close", .secondary, self.banner.dismiss)])
+                    self.show().setStep("Update failed", "\(e.localizedDescription). You can download it from the release page.",
+                                        [("Open download page", self.openPage), ("Close", self.closeWindow)])
                 case .success:
-                    self.banner.show("Version \(Updater.short(r.version)) is installed -- restart the app to use it.",
-                                     [("Restart now", .warn, self.restart), ("Later", .secondary, self.banner.dismiss)])
+                    self.show().setStep("Update installed", "Version \(Updater.short(r.version)) is installed -- restart the app to use it.",
+                                        [("Restart now", self.restart), ("Later", self.closeWindow)])
                 }
             }
         }
     }
 
     private func restart() {
-        if !canRestart() { banner.text = "Wait until the current delete has finished, then restart."; return }
+        if !canRestart() { window?.setProgress("Wait until the current delete has finished, then restart.", -1); return }
         Updater.relaunch()
     }
 }

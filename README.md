@@ -81,12 +81,12 @@ listed and scanned when you select them and press **Scan**. **About** and
 
 A few seconds after it starts, the app checks GitHub for a newer release (it
 stays silent if there is none, or if you are offline). When one exists, a
-banner offers **Update now**, **What's new** (the release page) and **Later**.
+small window (like About) offers **Update now**, **What's new** (the release page) and **Later**.
 **Update now** downloads the new `.exe`, checks it against the checksum GitHub
 publishes for the release, puts it in place of the running one and offers
 **Restart now**. To check by hand, click **Check for updates** in the title bar, or the version number at the bottom right.
 If the app's folder can't be written to (for example inside Program Files),
-the banner links to the download page instead.
+the update window links to the download page instead.
 
 ## Usage
 

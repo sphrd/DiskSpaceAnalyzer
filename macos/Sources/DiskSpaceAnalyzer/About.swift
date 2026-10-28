@@ -1,57 +1,128 @@
 import AppKit
 
-/// About window: logo, name, version, author, description, repository link, Check for updates / Close.
-final class AboutWindow: NSWindowController {
-    static let repoURL = URL(string: "https://github.com/sphrd/DiskSpaceAnalyzer")!
+/// The app's small dialog frame, shared by About and the update window so they always look the same: fixed dark
+/// window, the logo on the left, content in a column on the right, buttons bottom right (the first one primary).
+class AppDialog: NSWindowController, NSWindowDelegate {
+    let root = FlatView(frame: NSRect(x: 0, y: 0, width: 470, height: 250))
+    private var buttons: [RoundButton] = []
+    var onClose: (() -> Void)?
+    static let contentX: CGFloat = 146
 
-    convenience init(checkForUpdates: @escaping () -> Void) {
+    init(title: String) {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 470, height: 250), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        w.title = "About Disk Space Analyzer"
+        w.title = title
         w.appearance = NSAppearance(named: .darkAqua)
         w.backgroundColor = T.BG
         w.isReleasedWhenClosed = false
-        self.init(window: w)
-        let root = FlatView(frame: w.contentRect(forFrameRect: w.frame))
+        super.init(window: w)
+        w.delegate = self
         root.fill = T.BG
         w.contentView = root
+        root.addSubview(LogoView(frame: NSRect(x: 30, y: 30, width: 92, height: 92)))
+    }
+    required init?(coder: NSCoder) { fatalError() }
 
-        let logo = LogoView(frame: NSRect(x: 30, y: 30, width: 92, height: 92))
-        root.addSubview(logo)
-        var y: CGFloat = 26
-        func label(_ s: String, _ font: NSFont, _ color: NSColor, _ h: CGFloat) -> NSTextField {
-            let l = NSTextField(labelWithString: s)
-            l.font = font; l.textColor = color
-            l.frame = NSRect(x: 146, y: y, width: 300, height: h)
-            root.addSubview(l)
-            y += h
-            return l
+    var contentWidth: CGFloat { root.bounds.width - AppDialog.contentX - 24 }
+    var buttonsTop: CGFloat { buttons.first?.frame.minY ?? root.bounds.height - 20 }
+
+    @discardableResult
+    func addLabel(_ s: String, _ font: NSFont, _ color: NSColor, y: inout CGFloat, height: CGFloat, gapAfter: CGFloat = 0) -> NSTextField {
+        let l = NSTextField(wrappingLabelWithString: s)
+        l.font = font; l.textColor = color
+        l.frame = NSRect(x: AppDialog.contentX, y: y, width: contentWidth, height: height)
+        root.addSubview(l)
+        y += height + gapAfter
+        return l
+    }
+
+    /// Replaces the buttons, laid out right to left; the first is primary, the others secondary.
+    func setButtons(_ items: [(String, () -> Void)]) {
+        buttons.forEach { $0.removeFromSuperview() }
+        buttons = []
+        var x = root.bounds.width - 24
+        for (i, item) in items.enumerated() {
+            let b = RoundButton(item.0, i == 0 ? .primary : .secondary, item.1)
+            if i == 0 { b.minChars = 8 }
+            let s = b.preferredSize
+            x -= s.width
+            b.frame = NSRect(x: x, y: root.bounds.height - 20 - s.height, width: s.width, height: s.height)
+            x -= 8
+            root.addSubview(b)
+            buttons.append(b)
         }
-        _ = label("Disk Space Analyzer", NSFont.boldSystemFont(ofSize: 20), T.FG, 28); y += 4
-        _ = label("Version \(Updater.currentString)", Theme.font, T.FG, 19)
-        _ = label("Author: sphrd", Theme.font, T.FG, 19); y += 10
-        let desc = label("Fast disk space analyzer and cleaner for macOS.\nFree and open source (MIT licence).", Theme.font9, T.MUTED, 34)
-        desc.maximumNumberOfLines = 2
-        y += 6
-        let link = LinkLabel("github.com/sphrd/DiskSpaceAnalyzer") { NSWorkspace.shared.open(AboutWindow.repoURL) }
-        link.frame = NSRect(x: 146, y: y, width: 300, height: 17)
-        root.addSubview(link)
-
-        let close = RoundButton("Close", .primary) { [weak w] in w?.close() }
-        close.minChars = 8
-        let check = RoundButton("Check for updates", .secondary) { [weak w] in w?.close(); checkForUpdates() }
-        let cs = close.preferredSize, ks = check.preferredSize
-        let by = root.bounds.height - 20 - cs.height
-        close.frame = NSRect(x: root.bounds.width - 24 - cs.width, y: by, width: cs.width, height: cs.height)
-        check.frame = NSRect(x: close.frame.minX - 8 - ks.width, y: by, width: ks.width, height: ks.height)
-        root.addSubview(close); root.addSubview(check)
     }
 
     func present(over parent: NSWindow?) {
         guard let w = window else { return }
-        if let p = parent { w.setFrameOrigin(NSPoint(x: p.frame.midX - w.frame.width / 2, y: p.frame.midY - w.frame.height / 2)) }
-        else { w.center() }
+        if !w.isVisible {
+            if let p = parent { w.setFrameOrigin(NSPoint(x: p.frame.midX - w.frame.width / 2, y: p.frame.midY - w.frame.height / 2)) }
+            else { w.center() }
+        }
         showWindow(nil)
         w.makeKeyAndOrderFront(nil)
+    }
+
+    func close() { window?.close() }
+    func windowWillClose(_ notification: Notification) { onClose?() }
+    override func cancelOperation(_ sender: Any?) { close() }
+}
+
+/// About window: logo, name, version, author, description and licence, repository link.
+final class AboutWindow: AppDialog {
+    static let repoURL = URL(string: "https://github.com/sphrd/DiskSpaceAnalyzer")!
+
+    convenience init(checkForUpdates: @escaping () -> Void) {
+        self.init(title: "About Disk Space Analyzer")
+        var y: CGFloat = 26
+        addLabel("Disk Space Analyzer", NSFont.boldSystemFont(ofSize: 20), T.FG, y: &y, height: 28, gapAfter: 4)
+        addLabel("Version \(Updater.currentString)", Theme.font, T.FG, y: &y, height: 19)
+        addLabel("Author: sphrd", Theme.font, T.FG, y: &y, height: 19, gapAfter: 10)
+        addLabel("Fast disk space analyzer and cleaner for macOS.\nFree and open source (MIT licence).", Theme.font9, T.MUTED, y: &y, height: 34, gapAfter: 6)
+        let link = LinkLabel("github.com/sphrd/DiskSpaceAnalyzer") { NSWorkspace.shared.open(AboutWindow.repoURL) }
+        link.frame = NSRect(x: AppDialog.contentX, y: y, width: 300, height: 17)
+        root.addSubview(link)
+        setButtons([("Close", { [weak self] in self?.close() }), ("Check for updates", { [weak self] in self?.close(); checkForUpdates() })])
+    }
+}
+
+/// Update window, in the same frame as About: heading, one line of text, a progress bar while downloading, and the
+/// buttons for the current step.
+final class UpdateWindow: AppDialog {
+    private var heading: NSTextField!
+    private var body: NSTextField!
+    private let bar = ProgressPill()
+
+    convenience init() {
+        self.init(title: "Disk Space Analyzer - updates")
+        var y: CGFloat = 26
+        heading = addLabel(" ", NSFont.boldSystemFont(ofSize: 20), T.FG, y: &y, height: 28, gapAfter: 8)
+        body = addLabel(" ", Theme.font, T.FG, y: &y, height: 60)
+        root.addSubview(bar)
+        bar.isHidden = true
+    }
+
+    func setStep(_ head: String, _ text: String, progress: Double = -1, _ items: [(String, () -> Void)]) {
+        heading.stringValue = head
+        body.stringValue = text
+        setButtons(items)
+        setProgress(text, progress)
+    }
+
+    func setProgress(_ text: String, _ progress: Double) {
+        body.stringValue = text
+        bar.frame = NSRect(x: AppDialog.contentX, y: buttonsTop - 28, width: contentWidth, height: 8)
+        bar.fraction = progress
+        bar.isHidden = progress < 0
+    }
+}
+
+final class ProgressPill: NSView {
+    var fraction: Double = 0 { didSet { needsDisplay = true } }
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.fillRound(bounds, bounds.height / 2, fill: T.BORDER)
+        let w = (bounds.width * CGFloat(min(1, max(0, fraction)))).rounded()
+        if w > 0 { Theme.fillRound(NSRect(x: 0, y: 0, width: max(w, bounds.height), height: bounds.height), bounds.height / 2, fill: T.ACCENT) }
     }
 }
 

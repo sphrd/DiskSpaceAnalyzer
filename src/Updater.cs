@@ -170,14 +170,14 @@ namespace DiskSpaceAnalyzer
     }
 
     /// <summary>
-    /// Attention banner under the toolbar for updates (design language §2.4: warn-bg panel, warn-border outline,
-    /// warn-fg text on the left, buttons on the right). Hidden unless there is something to say.
+    /// Update flow shown in the update window (same frame as About): checking, up to date, update available,
+    /// downloading with progress and Cancel, installed with Restart now, and the error cases. Automatic checks stay
+    /// silent unless there is an update; manual checks always open the window.
     /// </summary>
-    internal sealed class UpdateBanner : Control
+    internal sealed class UpdateManager
     {
-        readonly Label text;
-        readonly RoundButton primary, secondary, tertiary;
-        Action onPrimary, onSecondary, onTertiary;
+        readonly Form owner;
+        UpdateForm form;
         ReleaseInfo release;
         CancellationTokenSource cancel;
         bool checking;
@@ -185,93 +185,52 @@ namespace DiskSpaceAnalyzer
         /// <summary>Asked before restarting; false while work is running that must not be cut off (permanent delete).</summary>
         public Func<bool> CanRestart = () => true;
 
-        public UpdateBanner()
+        public UpdateManager(Form owner) { this.owner = owner; }
+
+        static KeyValuePair<string, Action> B(string text, Action a) { return new KeyValuePair<string, Action>(text, a); }
+
+        /// <summary>The update window, created on first use and brought to the front.</summary>
+        UpdateForm Window()
         {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            BackColor = Theme.BG;
-            Visible = false;
-            text = new Label { AutoSize = false, AutoEllipsis = true, UseMnemonic = false, Font = Theme.FONT_9, ForeColor = Theme.WARN_FG, BackColor = Theme.WARN_BG, TextAlign = ContentAlignment.MiddleLeft };
-            primary = new RoundButton("", ButtonKind.Warn) { Font = new Font(Theme.FONT_9, FontStyle.Bold) };
-            secondary = new RoundButton("", ButtonKind.Secondary) { Font = Theme.FONT_9 };
-            tertiary = new RoundButton("", ButtonKind.Secondary) { Font = Theme.FONT_9 };
-            primary.Click += (s, e) => { if (onPrimary != null) onPrimary(); };
-            secondary.Click += (s, e) => { if (onSecondary != null) onSecondary(); };
-            tertiary.Click += (s, e) => { if (onTertiary != null) onTertiary(); };
-            Controls.AddRange(new Control[] { text, primary, secondary, tertiary });
-            Height = Theme.FONT_9.Height + Theme.S(12) + Theme.S(16) + Theme.S(10);
-        }
-
-        void ShowMessage(string message, string p, Action pa, string s = null, Action sa = null, string t = null, Action ta = null)
-        {
-            text.Text = message;
-            Set(primary, p, pa, ref onPrimary);
-            Set(secondary, s, sa, ref onSecondary);
-            Set(tertiary, t, ta, ref onTertiary);
-            Visible = true;
-            PerformLayout();
-            Invalidate();
-        }
-
-        static void Set(RoundButton b, string label, Action action, ref Action slot)
-        {
-            b.Visible = label != null;
-            b.Text = label ?? "";
-            b.Enabled = true;
-            slot = action;
-        }
-
-        void Dismiss() { Visible = false; }
-
-        Rectangle Box { get { return new Rectangle(0, 0, Width, Height - Theme.S(10)); } }
-
-        protected override void OnLayout(LayoutEventArgs e)
-        {
-            base.OnLayout(e);
-            if (text == null) return;
-            var b = Box;
-            int x = b.Right - Theme.S(10), gap = Theme.S(6);
-            foreach (var btn in new[] { tertiary, secondary, primary })
+            if (form == null || form.IsDisposed)
             {
-                if (!btn.Visible) continue;
-                var ps = btn.GetPreferredSize(Size.Empty);
-                x -= ps.Width;
-                btn.Bounds = new Rectangle(x, b.Y + (b.Height - ps.Height) / 2, ps.Width, ps.Height);
-                x -= gap;
+                form = new UpdateForm();
+                form.FormClosed += (s, e) => { if (cancel != null) cancel.Cancel(); };
+                form.Show(owner);
             }
-            int left = b.X + Theme.S(14);
-            text.Bounds = new Rectangle(left, b.Y + 2, Math.Max(0, x - left - Theme.S(6)), b.Height - 4);
+            else form.Activate();
+            return form;
         }
 
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            e.Graphics.Clear(BackColor);
-            Theme.FillRound(e.Graphics, Box, Theme.S(12), Theme.WARN_BG, Theme.WARN_BORDER);
-        }
+        void CloseWindow() { if (form != null && !form.IsDisposed) form.Close(); }
 
-        // ------------------------------------------------------------------ flow
-
-        /// <summary>Checks GitHub in the background. Automatic checks stay silent unless an update exists.</summary>
+        /// <summary>Checks GitHub in the background.</summary>
         public async void Check(bool manual)
         {
-            if (checking || (cancel != null)) return;
+            if (checking || cancel != null) { if (manual && form != null && !form.IsDisposed) form.Activate(); return; }
             checking = true;
-            if (manual) ShowMessage("Checking for updates...", null, null);
+            if (manual) Window().SetStep("Checking for updates...", "Looking for the latest release on GitHub.", -1, B("Close", CloseWindow));
             ReleaseInfo r = null;
             Exception error = null;
             try { r = await Task.Run(() => Updater.GetLatest()); }
             catch (Exception ex) { error = ex; }
             checking = false;
-            if (IsDisposed) return;
+            if (owner.IsDisposed) return;
+            bool windowOpen = form != null && !form.IsDisposed;
+            if (manual && !windowOpen) return;                      // closed while checking
 
             if (error != null || r == null)
             {
-                if (manual) ShowMessage("Could not check for updates: " + FirstLine(error) + ".", "Open download page", OpenPage, "Close", Dismiss);
+                if (manual) Window().SetStep("Update check failed", "Could not check for updates: " + FirstLine(error) + ".", -1,
+                    B("Close", CloseWindow), B("Open download page", OpenPage));
                 return;
             }
             release = r;
             if (r.Version <= Updater.Current)
             {
-                if (manual) ShowMessage(string.Format("You have the latest version ({0}).", Updater.Short(Updater.Current)), "Close", Dismiss);
+                if (manual) Window().SetStep("You're up to date",
+                    string.Format("Version {0} is the latest version.", Updater.Short(Updater.Current)), -1,
+                    B("Close", CloseWindow), B("What's new", OpenPage));
                 return;
             }
             Offer();
@@ -281,9 +240,9 @@ namespace DiskSpaceAnalyzer
         {
             string msg = string.Format("Version {0} is available -- you have {1}.", Updater.Short(release.Version), Updater.Short(Updater.Current));
             if (release.AssetUrl == null)
-                ShowMessage(msg, "Open download page", OpenPage, "Later", Dismiss);
+                Window().SetStep("Update available", msg, -1, B("Open download page", OpenPage), B("Later", CloseWindow));
             else
-                ShowMessage(msg, "Update now", StartUpdate, "What's new", OpenPage, "Later", Dismiss);
+                Window().SetStep("Update available", msg, -1, B("Update now", StartUpdate), B("What's new", OpenPage), B("Later", CloseWindow));
         }
 
         void OpenPage() { Updater.Open(release != null ? release.PageUrl : Updater.ReleasesPage); }
@@ -292,14 +251,16 @@ namespace DiskSpaceAnalyzer
         {
             if (!Updater.FolderWritable())
             {
-                ShowMessage("This folder can't be written to, so the update can't be installed here -- download it from the release page.",
-                    "Open download page", OpenPage, "Later", Dismiss);
+                Window().SetStep("Can't update here",
+                    "This folder can't be written to, so the update can't be installed here -- download it from the release page.", -1,
+                    B("Open download page", OpenPage), B("Later", CloseWindow));
                 return;
             }
             cancel = new CancellationTokenSource();
             var token = cancel.Token;
-            string label = "Downloading version " + Updater.Short(release.Version);
-            ShowMessage(label + "...", null, null, "Cancel", () => cancel.Cancel());
+            string label = "Version " + Updater.Short(release.Version);
+            var w = Window();
+            w.SetStep("Downloading update", label + "...", 0, B("Cancel", () => { if (cancel != null) cancel.Cancel(); }));
             long lastTick = 0;
             Action<long, long> progress = (done, total) =>
             {
@@ -309,7 +270,8 @@ namespace DiskSpaceAnalyzer
                 string t = total > 0
                     ? string.Format("{0}: {1} of {2} ({3:0} %)", label, Fmt.Size(done), Fmt.Size(total), 100.0 * done / total)
                     : string.Format("{0}: {1}", label, Fmt.Size(done));
-                if (!IsDisposed) BeginInvoke(new Action(() => text.Text = t));
+                double f = total > 0 ? (double)done / total : 0;
+                if (!w.IsDisposed) w.BeginInvoke(new Action(() => { if (!w.IsDisposed) w.SetProgress(t, f); }));
             };
             Exception error = null;
             try
@@ -323,43 +285,46 @@ namespace DiskSpaceAnalyzer
             }
             catch (Exception ex) { error = ex; }
             cancel = null;
-            if (IsDisposed) return;
+            if (owner.IsDisposed) return;
+            bool windowOpen = form != null && !form.IsDisposed;
             if (error is OperationCanceledException)
             {
                 Updater.CleanUp();
-                Offer();
+                if (windowOpen) Offer();
                 return;
             }
             if (error != null)
             {
                 Updater.CleanUp();
-                ShowMessage("Update failed: " + FirstLine(error) + ". You can download it from the release page.", "Open download page", OpenPage, "Close", Dismiss);
+                Window().SetStep("Update failed", FirstLine(error) + ". You can download it from the release page.", -1,
+                    B("Open download page", OpenPage), B("Close", CloseWindow));
                 return;
             }
-            ShowMessage(string.Format("Version {0} is installed -- restart the app to use it.", Updater.Short(release.Version)),
-                "Restart now", Restart, "Later", Dismiss);
+            Window().SetStep("Update installed",
+                string.Format("Version {0} is installed -- restart the app to use it.", Updater.Short(release.Version)), -1,
+                B("Restart now", Restart), B("Later", CloseWindow));
         }
 
         void Restart()
         {
             if (!CanRestart())
             {
-                text.Text = "Wait until the current delete has finished, then restart.";
+                Window().SetProgress("Wait until the current delete has finished, then restart.", -1);
                 return;
             }
             try { Process.Start(new ProcessStartInfo(Updater.ExePath) { UseShellExecute = true }); }
             catch (Exception ex)
             {
-                text.Text = "Could not restart: " + FirstLine(ex) + ". Start the app again yourself.";
+                Window().SetProgress("Could not restart: " + FirstLine(ex) + ". Start the app again yourself.", -1);
                 return;
             }
-            var f = FindForm();
-            if (f != null) f.Close();
+            CloseWindow();
+            owner.Close();
         }
 
         static string FirstLine(Exception ex)
         {
-            if (ex == null) return "unknown error";
+            if (ex == null) return "Unknown error";
             var we = ex as WebException;
             var hr = we != null ? we.Response as HttpWebResponse : null;
             if (hr != null) return "GitHub answered " + (int)hr.StatusCode + " " + hr.StatusDescription;

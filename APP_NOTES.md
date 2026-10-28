@@ -13,8 +13,8 @@ patterns (Part 3) are applied through the WinForms mapping below.
 | Theme tokens (palette, fonts), drawing helpers, DWM interop | `src/Theme.cs` |
 | Widgets: RoundButton, RoundedPanel, PathInput, TabStrip, PillScrollBar, ScrollHost, BusyOverlay, Spinner, ScanBar, DarkRenderer, DarkTreeView, TreeHeader | `src/Widgets.cs` |
 | List view (rows, bars, header, empty-state hint) + sorting | `src/Controls.cs` |
-| Self-update (GitHub latest release, download, verify, swap) and the update banner | `src/Updater.cs` |
-| About window (logo, version, author sphrd, repo link, Check for updates) | `src/About.cs` |
+| Self-update (GitHub latest release, download, verify, swap) and the update flow (`UpdateManager`) | `src/Updater.cs` |
+| About window and update window, both on the shared `AppDialog` frame (logo left, content column, buttons bottom right) | `src/About.cs` |
 | Pie chart pane (donut linked to the contents list) | `src/Chart.cs` |
 | Scanner / deleter / interop (domain, not UI) | `src/Scanner.cs`, `src/Deleter.cs`, `src/Native.cs` |
 | Asset generator (icon `.ico`, 256 px `app.png` for the README, 1280x640 `social-preview.png` for GitHub) | `tools/make_icon.ps1` (run by every build) |
@@ -94,6 +94,8 @@ patterns (Part 3) are applied through the WinForms mapping below.
   design agent file on github."
 - 2026-10-28 (macOS): user asked for the macOS dmg in the same repository and the same release flow; Mac available for
   final hands-on checks.
+- 2026-10-28: "the update prompt, whether its to say you have the latest version, or else should be in the same looking
+  window as the about window. fix that, and update app design agent."
 - 2026-10-28: "why the menu bar is there? it should be next to the apps logo and name. on that bar. like every other app."
 - 2026-10-28: "reduce the default app size. it doesnt fit in my screen." (1920x1080 at 125 %: 1500x880 became
   1875x995 px and `CenterScreen` pushed it below the taskbar.)
@@ -147,7 +149,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 ## Decisions and gotchas
 
 - **macOS version:** native Swift/AppKit app, same behaviour and look as Windows (three panels, linked chart, scan bar,
-  update banner, About, logo morph), built and checked only on GitHub's macOS runners (this machine is Windows): the
+  update window, About, logo morph), built and checked only on GitHub's macOS runners (this machine is Windows): the
   `macos` CI job runs `build.sh`, a headless `--cli scan /usr/share` and `--cli screenshot` (views render themselves
   into PNGs, no screen-recording permission needed), and attaches `DiskSpaceAnalyzer-macOS.dmg` to the same release as
   the exe. Scanner: `getattrlistbulk` on 8-32 threads, does not follow symlinks and skips every other mount point
@@ -164,7 +166,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
   also build (no release), which is how the macOS app is compiled and checked before merging.
 - **Updates:** 3 s after start the app asks `api.github.com/repos/sphrd/DiskSpaceAnalyzer/releases/latest` (no token;
   drafts and pre-releases are never offered). If the tag (`vX.Y.Z`) is newer than the exe's `AssemblyVersion`, an
-  attention banner (warn tokens, §2.4) offers Update now / What's new / Later; automatic checks are silent otherwise.
+  update window (same frame as About: `AppDialog`) offers Update now / What's new / Later; automatic checks are silent
+  otherwise. Every step uses that window: Checking..., You're up to date (Close / What's new), Update available,
+  Downloading (progress pill + Cancel), Update installed (Restart now / Later), Update check failed / Update failed /
+  Can't update here (Open download page). Replaced the amber banner on the user's request (2026-10-28), in both apps.
   Manual check: Check for updates in the title bar, the About window's button, or the version label at the bottom right.
 - Custom title bar (`TitleBar` in `Widgets.cs`) replaces the native caption: app logo, app name, then the menu items
   **About** (F1) and **Check for updates** right next to the name, and drawn minimise / maximise / close buttons (close
@@ -176,10 +181,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
   `<exe>.download` with progress and Cancel, check its size and the SHA-256 `digest` GitHub reports for the asset,
   rename the running exe to `<exe>.old` (Windows allows renaming a running exe), move the download into place, then
   Restart now. The next start deletes `.old` / `.download`, retrying for ~15 s because the previous process may still
-  be closing. If the folder is not writable (probed by creating a file), the banner links to the release page instead.
+  be closing. If the folder is not writable (probed by creating a file), the update window links to the release page instead.
   .NET 4.x needs TLS 1.2 switched on explicitly for GitHub; GitHub needs a User-Agent header.
 - **Releasing for the updater:** the tag must be `v` + the new `AssemblyVersion` (higher than before) and the asset must
-  be named exactly `DiskSpaceAnalyzer.exe`; otherwise the banner only links to the release page. Installs older than
+  be named exactly `DiskSpaceAnalyzer.exe`; otherwise the update window only links to the release page. Installs older than
   v1.5.0 have no updater: those users must download v1.5.0 once by hand.
 - Tested end to end with a local build labelled 1.3.9 against the published v1.4.0: banner shown, download, checksum,
   swap, restart into 1.4.0; installed file identical to the release asset.

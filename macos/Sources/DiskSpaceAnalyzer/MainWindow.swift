@@ -292,7 +292,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     private lazy var btnRescan = RoundButton("Rescan folder", .secondary) { [unowned self] in self.rescanSelected() }
     private lazy var btnFinder = RoundButton("Show in Finder", .secondary) { [unowned self] in self.showInFinder() }
     private lazy var btnDelete = RoundButton("Delete permanently", .warn) { [unowned self] in self.deleteSelected() }
-    let banner = Banner()
     private let scanBar = ScanBar()
     private let split = NSSplitView()
     private let treePanel = ContainerPanel()
@@ -312,7 +311,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     private lazy var versionLink = LinkLabel("v" + Updater.currentString) { [unowned self] in self.updates.check(manual: true) }
     private let overlay = BusyOverlay()
     private let contextMenu = NSMenu()
-    lazy var updates = UpdateController(banner: banner)
+    lazy var updates = UpdateController(parent: window)
     private var splitPositioned = false
 
     convenience init() {
@@ -368,13 +367,12 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         btnUp.tip = "Go to the parent folder (⌘↑)"
         btnRescan.tip = "Rescan the selected folder (⌘R)"
         btnDelete.tip = "Permanently delete the selected items, bypassing the Trash (⌘⌫)"
-        for v: NSView in [pathLabel, pathPanel, btnBrowse, btnScan, btnAccess, btnUp, btnRescan, btnFinder, btnDelete, banner, scanBar, split, statusLabel, driveLabel, versionLink] {
+        for v: NSView in [pathLabel, pathPanel, btnBrowse, btnScan, btnAccess, btnUp, btnRescan, btnFinder, btnDelete, scanBar, split, statusLabel, driveLabel, versionLink] {
             root.addSubview(v)
         }
         for l in [statusLabel, driveLabel] { l.font = Theme.font9; l.textColor = T.MUTED; l.lineBreakMode = .byTruncatingTail }
         driveLabel.alignment = .right
 
-        banner.onChange = { [unowned self] in self.layoutRoot() }
         scanBar.cancelButton.onClick = { [unowned self] in self.scanner?.cancel(); self.scanBar.cancelButton.isEnabled = false }
         updates.canRestart = { [unowned self] in !self.busy }
 
@@ -500,7 +498,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             x += p.width + gap
         }
         y += h + 10
-        if !banner.isHidden { banner.frame = NSRect(x: m, y: y, width: b.width - 2 * m, height: Banner.height); y += Banner.height }
         if !scanBar.isHidden { scanBar.frame = NSRect(x: m, y: y, width: b.width - 2 * m, height: ScanBar.height); y += ScanBar.height }
         let statusH: CGFloat = 28
         split.frame = NSRect(x: m, y: y, width: b.width - 2 * m, height: max(100, b.height - y - statusH))

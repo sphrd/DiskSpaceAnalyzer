@@ -142,7 +142,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.showAbout(nil)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                         if let v = self.about?.window?.contentView { self.save(v, dir + "/4-about.png") }
-                        exit(0)
+                        self.about?.close()
+                        self.main.updates.check(manual: true)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                            if let w = NSApp.windows.first(where: { $0.title == "Disk Space Analyzer - updates" }), let v = w.contentView { self.save(v, dir + "/5-update.png") }
+                            exit(0)
+                        }
                     }
                 }
             }

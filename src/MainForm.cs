@@ -41,7 +41,7 @@ namespace DiskSpaceAnalyzer
         bool scanning;
         ScanRoot scanRoot;
         ScanBar scanBar;
-        UpdateBanner updateBanner;
+        UpdateManager updates;
         /// <summary>Scanned tree of the root that holds the current selection (null when that root is not scanned).</summary>
         DirNode root { get { return active != null ? active.Node : null; } }
         List<FileEntry> topFiles = new List<FileEntry>();
@@ -247,9 +247,9 @@ namespace DiskSpaceAnalyzer
             tips.SetToolTip(versionLink, "Check for updates");
             versionLink.MouseEnter += (s, e) => versionLink.ForeColor = Theme.ACCENT;
             versionLink.MouseLeave += (s, e) => versionLink.ForeColor = Theme.MUTED;
-            versionLink.Click += (s, e) => updateBanner.Check(true);
+            versionLink.Click += (s, e) => updates.Check(true);
             status.Controls.Add(versionLink);
-            updateBanner = new UpdateBanner { Dock = DockStyle.Top, CanRestart = () => !busy };
+            updates = new UpdateManager(this) { CanRestart = () => !busy };
 
             overlay = new BusyOverlay();
             overlay.CancelButton.Click += (s, e) =>
@@ -259,8 +259,7 @@ namespace DiskSpaceAnalyzer
                 overlay.CancelButton.Enabled = false;
             };
 
-            // Docking runs from the last-added control back: status (bottom), toolbar (top), update banner (top, under the
-            // toolbar, only while it has something to say), scan bar (top, under those), then the panes fill the rest.
+            // Docking runs from the last-added control back: status (bottom), toolbar (top), scan bar (top, under those), then the panes fill the rest.
             scanBar = new ScanBar { Dock = DockStyle.Top };
             scanBar.CancelButton.Click += (s, e) =>
             {
@@ -272,7 +271,7 @@ namespace DiskSpaceAnalyzer
             // width, so it is placed at (0, 0) and anchored instead of docked (docking would respect the side padding).
             titleBar = new TitleBar();
             titleBar.AddItem("About", ShowAbout);
-            titleBar.AddItem("Check for updates", () => updateBanner.Check(true));
+            titleBar.AddItem("Check for updates", () => updates.Check(true));
             Activated += (s, e) => titleBar.Active = true;
             Deactivate += (s, e) => titleBar.Active = false;
             Resize += (s, e) => titleBar.Invalidate();
@@ -280,7 +279,6 @@ namespace DiskSpaceAnalyzer
 
             Controls.Add(split);
             Controls.Add(scanBar);
-            Controls.Add(updateBanner);
             Controls.Add(toolbar);
             Controls.Add(status);
             Controls.Add(titleBar);
@@ -319,7 +317,7 @@ namespace DiskSpaceAnalyzer
                 else ScanPath(Path.GetPathRoot(Environment.SystemDirectory));
                 // Look for a newer release in the background; silent unless there is one.
                 var later = new System.Windows.Forms.Timer { Interval = 3000 };
-                later.Tick += (s2, e2) => { later.Dispose(); updateBanner.Check(false); };
+                later.Tick += (s2, e2) => { later.Dispose(); updates.Check(false); };
                 later.Start();
             };
             FormClosing += (s, e) => { if (scanner != null) scanner.Cancel(); };
@@ -431,7 +429,7 @@ namespace DiskSpaceAnalyzer
 
         void ShowAbout()
         {
-            using (var f = new AboutForm(() => updateBanner.Check(true))) f.ShowDialog(this);
+            using (var f = new AboutForm(() => updates.Check(true))) f.ShowDialog(this);
         }
 
         // ---------------------------------------------------------------- scanning
