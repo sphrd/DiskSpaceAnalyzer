@@ -14,7 +14,37 @@ namespace DiskSpaceAnalyzer
     internal sealed partial class MainForm
     {
         public string ShotDir;
+        public bool ShotDemo;
         bool shotsStarted;
+
+        /// <summary>Demo pictures: the scanned folder becomes a made-up drive "E:\ Data"; this computer's drives disappear.</summary>
+        void MakeDemoDrive()
+        {
+            foreach (var w in roots.ToList()) StopWatching(w);
+            var r = roots.First(x => x.Node != null);
+            roots.Clear();
+            r.Path = @"E:\"; r.Node.Name = @"E:\"; r.Previous = null; r.IsDrive = true; r.IsSystem = false; r.Label = "Data";
+            r.Total = 1000L * 1000 * 1000 * 1000; r.Free = r.Total - r.Node.Size - (14L << 30);
+            roots.Add(r);
+            roots.Add(new ScanRoot { Path = @"F:\", IsDrive = true, Label = "Backup - removable", Total = 2000L * 1000 * 1000 * 1000, Free = 1240L * 1000 * 1000 * 1000 });
+            roots.Add(new ScanRoot { Path = @"G:\", IsDrive = true, Label = "Local disk", Total = 500L * 1000 * 1000 * 1000, Free = 310L * 1000 * 1000 * 1000 });
+            active = r;
+            current = null;
+            dupeScope = @"E:\";
+            pathBox.Text = @"E:\";
+            pathBox.Choices.Clear();
+            RefreshTree(r.Node);
+            liveLabel.Text = "Live";
+            statusLabel.Text = string.Format(@"E:\: {0} in {1:N0} files and {2:N0} folders - scanned in 0.41 s, read from the master file table",
+                Fmt.Size(r.Node.Size), r.Node.Files, r.Node.Dirs);
+            driveLabel.Text = string.Format(@"E:\  {0} free of {1} ({2:0}% free)", Fmt.Size(r.Free), Fmt.Size(r.Total), 100.0 * r.Free / r.Total);
+        }
+
+        void ClearHover()
+        {
+            chart.SetHover(-1);
+            foreach (var p in pages) { p.List.ResetHover(); p.List.Invalidate(); }
+        }
 
         [DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
@@ -38,22 +68,32 @@ namespace DiskSpaceAnalyzer
             try
             {
                 Directory.CreateDirectory(ShotDir);
+                if (ShotDemo)
+                {
+                    // Duplicates read the files, so they are found before the folder is shown as a made-up drive.
+                    FindDuplicates();
+                    for (int k = 0; k < 600 && dupeFinder != null; k++) await Task.Delay(200);
+                    MakeDemoDrive();
+                }
                 await Task.Delay(1500);
+                if (ShotDemo) ClearHover();
                 SaveShot("1-contents");
                 for (int i = 1; i < pages.Count; i++)
                 {
                     var p = pages[i];
+                    if (ShotDemo && (p == pSuggest || p == pChanges)) continue;   // they would show this computer
                     if (p == pBasket)
                         foreach (var it in pFiles.List.Items.Cast<ListViewItem>().Select(x => x.Tag as ItemInfo).Where(x => x != null && x.CanDelete).Take(4))
                             foreach (var t in DeleteTarget.From(it)) AddTarget(t);
                     viewTabs.SelectedIndex = i;
-                    if (p == pDupes)
+                    if (p == pDupes && !(ShotDemo && dupeGroups != null))
                     {
                         FindDuplicates();
                         for (int k = 0; k < 600 && dupeFinder != null; k++) await Task.Delay(200);
                     }
                     if (p == pSuggest) for (int k = 0; k < 300 && suggestions == null; k++) await Task.Delay(200);
                     await Task.Delay(2000);
+                    if (ShotDemo) ClearHover();
                     SaveShot((i + 1) + "-" + p.Title.Split(' ')[0].ToLowerInvariant());
                 }
                 viewTabs.SelectedIndex = 0;

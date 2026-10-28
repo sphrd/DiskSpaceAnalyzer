@@ -220,6 +220,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Since v1.3 the app scans the system drive and lists real drives at startup, so the screenshot is taken in-process:
   scan `C:\Demo` (sparse files), then via reflection rename that root to a made-up `E:\ Data` drive with a made-up
   capacity, add a made-up `F:\ Backup` drive, drop the real drives, and set the status/drive labels before capturing.
+  Since v1.7 this is built in: `.\tools\make_demo.ps1 C:\Demo` (sparse files, ~250 MB on disk, a few duplicate pairs),
+  `DiskSpaceAnalyzer.exe --cli screenshot <out> C:\Demo --demo` (finds duplicates first, then shows the folder as
+  `E:\ Data` with made-up `F:\`/`G:\` drives; skips Suggestions and Changes, which would show this PC), copy
+  `1-contents.png` to `assets\screenshot.png` and `4-duplicates.png` to `assets\screenshot-duplicates.png`, then
+  `.\tools\make_demo.ps1 C:\Demo -Remove` and delete `%LOCALAPPDATA%\DiskSpaceAnalyzer\history`.
 - Repo logo: `assets/app.png` at the top of the README; `assets/social-preview.png` is the GitHub social preview
   (Settings > General > Social preview; GitHub has no API for it, so it is uploaded by hand).
 

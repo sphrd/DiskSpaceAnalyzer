@@ -63,6 +63,8 @@ open list, slice for row, and hovering one highlights the other)
 - **Changes:** every full scan is remembered (folder sizes only, on this PC), so
   the next scan shows which folders grew or shrank since.
 
+![Duplicates view: groups of identical files and the space their extra copies take (demo data)](assets/screenshot-duplicates.png)
+
 **Cleaning up**
 
 - **Delete list:** collect items from any view (<kbd>Insert</kbd>), review them

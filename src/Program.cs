@@ -7,8 +7,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Fast disk space analyzer and cleaner for Windows")]
 [assembly: AssemblyProduct("Disk Space Analyzer")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 sphrd - MIT License")]
-[assembly: AssemblyVersion("1.6.0.0")]
-[assembly: AssemblyFileVersion("1.6.0.0")]
+[assembly: AssemblyVersion("1.7.0.0")]
+[assembly: AssemblyFileVersion("1.7.0.0")]
 
 namespace DiskSpaceAnalyzer
 {
@@ -18,17 +18,18 @@ namespace DiskSpaceAnalyzer
         static int Main(string[] args)
         {
             // Headless mode: DiskSpaceAnalyzer.exe --cli scan <folder>  (--scan <folder> is kept as an alias)
-            if (args.Length >= 1 && args[0] == "--cli" && !(args.Length == 4 && args[1] == "screenshot") && !(args.Length == 3 && args[1] == "selftest")) return Headless(args);
+            if (args.Length >= 1 && args[0] == "--cli" && !(args.Length >= 4 && args[1] == "screenshot") && !(args.Length == 3 && args[1] == "selftest")) return Headless(args);
             if (args.Length == 2 && args[0] == "--scan") return Headless(new[] { "--cli", "scan", args[1] });
 
             try { SetCurrentProcessExplicitAppUserModelID("sphrd.DiskSpaceAnalyzer"); } catch (Exception) { }
             Updater.CleanUp();   // the exe replaced by the last update, if any
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            // Screenshots of every view (for checks and documentation): DiskSpaceAnalyzer.exe --cli screenshot <out folder> <path to scan>
-            if (args.Length == 4 && args[0] == "--cli" && args[1] == "screenshot")
+            // Screenshots of every view (for checks and documentation): DiskSpaceAnalyzer.exe --cli screenshot <out folder> <path to scan> [--demo]
+            // --demo shows the scanned folder as a made-up drive and hides this computer's drives (for README pictures).
+            if (args.Length >= 4 && args[0] == "--cli" && args[1] == "screenshot")
             {
-                Application.Run(new MainForm(args[3]) { ShotDir = System.IO.Path.GetFullPath(args[2]) });
+                Application.Run(new MainForm(args[3]) { ShotDir = System.IO.Path.GetFullPath(args[2]), ShotDemo = args.Length > 4 && args[4] == "--demo" });
                 return 0;
             }
             // End-to-end self-test of live updates, the delete list, Recycle Bin, contents-only delete, duplicates and export:
