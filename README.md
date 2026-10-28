@@ -7,9 +7,9 @@
 <p align="center">A <b>free, open-source, fast</b> disk space analyzer and cleaner for Windows and macOS.</p>
 
 It starts analyzing your system drive the moment it opens. See exactly where
-your space went in a size tree, a contents list and a pie chart, then
-permanently delete what you don't need to reclaim space.
-
+your space went in a size tree, a contents list and a ring chart, find big,
+old and duplicate files, follow cleanup suggestions, and delete what you don't
+need, to the Recycle Bin or permanently.
 ![Disk Space Analyzer showing a drive with its size tree, contents list and pie chart (demo data)](assets/screenshot.png)
 
 ## Why
@@ -21,43 +21,75 @@ single-file GUI.
 
 ## Features
 
-- **Fast parallel scan** using the Win32 `FindFirstFileEx` API (basic info +
-  large fetch) across multiple worker threads, aggregating sizes bottom-up.
-- **Starts analyzing right away:** the system drive is scanned as soon as the
-  app opens. Other local drives (second disks, USB/external drives) are listed
-  in the tree with their used space and are scanned only when you ask; drives
-  plugged in or removed while the app runs appear and disappear automatically.
-- **Scans in the background:** a progress bar under the toolbar shows how far
-  the scan is (for a whole drive, as a percentage of its used space), the file
-  and folder counts and the current folder, with **Cancel** for partial
-  results. You can keep browsing other drives meanwhile.
-- **Size tree** of drives, folders and subfolders with aligned **Size** and
-  **% of parent** columns plus a percentage bar; the contents list adds
-  file/folder counts and is sortable by any column.
-- **Pie chart pane** for the selected drive or folder. Its slices follow the
-  folder contents list row for row, in the same order (also after you re-sort
-  the list); small rows next to each other are merged into one "smaller items"
-  slice. For a drive it adds the space taken by system/unreadable files and the
-  **free space**. Hover a slice to highlight its row (or all the rows of a
-  merged slice) in the list; hover a row to highlight its slice. Click a slice
-  to open that folder. The chart is drawn from the sizes already in memory, so
-  it never slows the scan.
-- **Folder contents** pane with owner-drawn percentage bars, plus a
-  **Largest files (top 1000)** tab to find big files anywhere in the tree.
-- **Permanent delete** (bypasses the Recycle Bin) of files and folders, with a
-  confirmation dialog showing item count and total size. Frees space immediately.
-- **Correct and safe:** follows nothing through junctions/symlinks (their targets
-  are never scanned or deleted), supports paths longer than 260 characters, and
-  clears read-only attributes so deletes don't get stuck.
-- **About** (version and author, <kbd>F1</kbd>) and **Check for updates** in the title bar, next to the app name.
-- **Rescan folder**, **Show in Explorer**, **Copy path**, drag-and-drop a
-  folder onto the window, and an optional **Run as administrator** relaunch for
-  protected folders.
-- **Dark, flat, rounded UI**: one blue accent, amber only for the destructive
-  action, thin pill scrollbars, dark title bar and menus.
-- **No installer, no runtime download.** A single ~100 KB `.exe` that runs on the
+**Scanning**
+
+- **Whole drives in seconds:** run as administrator, it reads an NTFS drive's
+  master file table directly (like WizTree): over a million files in about ten
+  seconds even on a slow cloud disk, many times faster than walking folders.
+  Without admin rights, for other file systems and for single folders it walks
+  folders in parallel with `FindFirstFileEx`; the status line says which was used.
+- **Starts right away and in the background:** the system drive is scanned when
+  the app opens, with a progress bar and **Cancel**; other drives (second disks,
+  USB) are listed and scanned on demand and appear/disappear as they are plugged
+  in or out.
+- **Live updates:** scanned drives and folders are watched; files that appear,
+  change or go away update the results within seconds, without a rescan.
+- **Size or size on disk:** one switch changes every view between file size (as
+  Explorer's Size column) and the space really used: compressed, sparse and
+  Compact OS files count what they take, small files a whole cluster,
+  OneDrive "online-only" files nothing, and hard links only once (with the
+  master file table).
+
+**Seeing where the space went** (tabs above the list; the chart always shows the
+open list, slice for row, and hovering one highlights the other)
+
+- **Contents:** the selected folder's subfolders and files with size, share,
+  change since the last scan, counts and dates. The ring chart shows the
+  folder's contents and, in two outer rings, their subfolders; click any part
+  to open it. For a drive it also shows system/unreadable space and free space.
+- **Files:** the largest files under the selected folder, with a name search
+  (`*.iso`, `invoice`; <kbd>Ctrl</kbd>+<kbd>F</kbd>) and filters by type, size and age
+  ("older than 1 year"). Searches the in-memory index, so it is instant.
+- **File types:** space by extension or by category (videos, images, archives,
+  disk images, installers...). Double-click one to list its files.
+- **Duplicates:** files with identical content (same size, then a hash of the
+  start, then of the whole file). Hard links and online-only cloud files are not
+  counted. **Select extra copies** keeps the newest of each group.
+- **Suggestions:** space that can usually be freed: Recycle Bin, temporary
+  files, Windows Update downloads, crash dumps, thumbnail and browser caches,
+  developer caches (npm, NuGet, pip, Gradle, Maven, Cargo, Go...), node_modules
+  folders, old installers in Downloads, Windows.old. Each says what deleting it
+  means; caches and temporary folders are emptied, not removed.
+- **Changes:** every full scan is remembered (folder sizes only, on this PC), so
+  the next scan shows which folders grew or shrank since.
+
+**Cleaning up**
+
+- **Delete list:** collect items from any view (<kbd>Insert</kbd>), review them
+  together, then **Move to Recycle Bin** (can be undone) or **Delete
+  permanently** (frees the space now). Items inside a listed folder are not
+  added twice.
+- **Direct delete** from any list: **Delete permanently** (<kbd>Del</kbd>) or
+  **Move to Recycle Bin** in the right-click menu, always with a confirmation
+  showing the items and total size, and a warning for Windows or Program Files.
+- **Correct and safe:** junctions and symbolic links are never followed (their
+  targets are not scanned or deleted), paths longer than 260 characters work,
+  read-only files are handled, and files in use are skipped when emptying caches.
+
+**And**
+
+- **Export** the selected folder as an HTML report (summary, chart, largest
+  folders and files, file types) or as CSV (every folder, or the list shown).
+- **About** (<kbd>F1</kbd>) and **Check for updates** in the title bar; updates install themselves.
+- **Rescan folder** (<kbd>F5</kbd>), **Show in Explorer**, **Copy path**,
+  drag-and-drop a folder onto the window, and **Run as administrator**.
+- **Dark, flat, rounded UI**: one blue accent, amber only for destructive actions.
+- **No installer, no runtime download.** A single small `.exe` that runs on the
   .NET Framework 4.x built into every Windows 10/11 machine.
 
+The macOS version has the scanning, contents, chart, delete and update features;
+the new views (Files, File types, Duplicates, Suggestions, Changes, Delete list)
+are Windows-only for now.
 ## Download
 
 Grab `DiskSpaceAnalyzer.exe` (Windows) or `DiskSpaceAnalyzer-macOS.dmg` (macOS) from the
@@ -90,19 +122,24 @@ the update window links to the download page instead.
 
 ## Usage
 
-1. Start the app: it begins analyzing your system drive immediately.
+1. Start the app: it begins analyzing your system drive immediately. For the
+   fastest whole-drive scans, use **Run as administrator**.
 2. To analyze another drive, select it in the tree and press **Scan** (or
    double-click it). To analyze any folder, type or browse to it, or drag it
    onto the window, and press **Scan** (or Enter).
-3. Explore the tree, the pie chart and the **Largest files** tab. Click column
-   headers to sort, and chart slices to open a folder.
-4. Select items and press **Delete permanently** (or <kbd>Del</kbd>) to reclaim
-   space. Use **Rescan folder** (<kbd>F5</kbd>) to refresh after changes outside
-   the app.
+3. Explore the tree, the tabs and the chart. Click column headers to sort, and
+   chart parts to open a folder. The **Files**, **File types** and
+   **Duplicates** tabs work on the folder selected in the tree.
+4. Add what you want gone to the **Delete list** (<kbd>Insert</kbd>), review it,
+   then move it to the Recycle Bin or delete it permanently. Or delete directly
+   with <kbd>Del</kbd>.
 
-> ⚠️ **Deletion is permanent.** Deleted items do **not** go to the Recycle Bin and
-> cannot be recovered. Read the confirmation dialog before confirming.
+> ⚠️ **Delete permanently cannot be undone.** Those items do **not** go to the
+> Recycle Bin. Read the confirmation before confirming, or use **Move to Recycle Bin**.
 
+Command line (for scripts and checks): `DiskSpaceAnalyzer.exe --cli scan <folder> [--mft] [--files]`
+prints sizes; `--cli selftest <scratch folder>` runs the end-to-end self-test;
+`--cli screenshot <out folder> <folder>` saves a picture of every view.
 ## Build from source
 
 No Visual Studio, SDK, or NuGet required — it compiles with the C# compiler that

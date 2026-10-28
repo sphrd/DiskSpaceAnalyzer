@@ -99,6 +99,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - 2026-10-28: "why the menu bar is there? it should be next to the apps logo and name. on that bar. like every other app."
 - 2026-10-28: "reduce the default app size. it doesnt fit in my screen." (1920x1080 at 125 %: 1500x880 became
   1875x995 px and `CenterScreen` pushed it below the taskbar.)
+- 2026-10-28: "What other functionalities we can add to the app to make it competetive in its area?" Chosen: master file
+  table reading (WizTree speed), multi-ring chart, cleanup suggestions, collect-then-delete list with Recycle Bin option,
+  largest files view, file-type breakdown, duplicate finder, old files filter, search and filter, compare with the last
+  scan, CSV/HTML export, size on disk vs file size (compressed, sparse, hard links, OneDrive online-only), refresh after
+  changes (live updates).
 
 ## WinForms mapping of the design language
 
@@ -243,6 +248,37 @@ patterns (Part 3) are applied through the WinForms mapping below.
   -RedirectStandardOutput <file>`; a plain call does not capture a winexe's stdout. Headless crashes go to
   `DiskSpaceAnalyzer_error.txt` in the working directory.
 
+### Views, index and cleanup (v1.7.0)
+
+- **File index:** every scanned folder keeps a `FileRec[]` (name, size, size on disk, modified, attributes); the
+  Files, File types, Duplicates and export work from memory. `DirNode.OnDisk` picks the measure for every view
+  (`Size`/`LocalSize` are properties over `Bytes`/`Alloc`); switching re-sorts all child lists.
+- **Size on disk (folder walk):** rounded up to clusters; compressed, sparse and reparse-point files (Compact OS/WOF)
+  ask `GetCompressedFileSize`; cloud placeholders (OFFLINE / RECALL_ON_OPEN / RECALL_ON_DATA_ACCESS) count 0. Hard links
+  are counted per name here (only the master file table can tell them apart).
+- **Master file table (`Mft.cs`):** only for a drive root with admin rights; reads `\\.\C:` sequentially in 4 MB chunks
+  from the runs of record 0, applies the update sequence fixups, merges extension records by base reference. File size
+  = unnamed `$DATA`; size on disk = allocation of all `$DATA` streams (sparse/compressed: compressed size), except for
+  NTFS's own records 0-15 (`$BadClus:$Bad` claims the whole volume). Extra hard links are listed in their folders with
+  size on disk 0. On the GitHub runner: 1.2 M files in about 10 s (folder walk: over 7 minutes), size on disk within
+  0.5 % of the drive's used space. Any failure falls back to the folder walk; `--cli scan C:\ --mft` prints why.
+- **Gotcha:** picking the long name of each extra hard link by scanning the whole link list was quadratic (WinSxS has
+  100k+ links) and looked like a hang: use a dictionary keyed by (record, parent).
+- **View tabs** sit above the list and the chart (Contents, Files, File types, Duplicates, Suggestions, Changes, Delete
+  list); each view is a `Page` with a caption line, an optional filter/action bar (wraps; a search box gets its own row
+  when it wraps) and a `SizeListView`. `BuildSlices` turns any list into slices (rows of a duplicate group share their
+  group's slice via `ItemInfo.GroupOf`).
+- **Deletion** goes through `DeleteTarget` (file, folder, folder contents only, Recycle Bin) and `ConfirmAndDelete`;
+  afterwards `ApplyDeleted` drops removed nodes and rescans folders that still exist. Contents-only targets skip files in
+  use quietly (counted). Recycle uses `SHFileOperation` with ALLOWUNDO + WANTNUKEWARNING.
+- **History:** `%LOCALAPPDATA%\DiskSpaceAnalyzer\history\<root>.dsa` (gzip: folder names and sizes, no file names).
+- **Live updates:** `FileSystemWatcher` per scanned root; changes are applied every 2 s on the UI thread (re-read a
+  folder's own files, scan new folders, drop removed ones, rename in place); the contents list refreshes at most every
+  4 s and not while rows are selected. Our own deletes are ignored for 3 s. Overflow shows "Changes missed - rescan".
+- **Checks:** `--cli selftest <scratch>` (14 checks incl. live updates, Recycle Bin on CI, contents-only delete,
+  duplicates, export, history) and `--cli screenshot <out> <folder>` (every view) run the real window; CI runs the
+  self-test and the master file table check on the elevated Windows runner.
+
 ## Releases
 
 - v1.0.0 (2026-10-27): first release, light WinForms UI, ~66 KB.
@@ -261,3 +297,6 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Check for updates and About (version, author sphrd). ~140 KB.
 - v1.6.0 (2026-10-28): About and Check for updates as items in the custom title bar next to the logo; every update
   step shown in the About-style app dialog (no banner); first native macOS version (universal .dmg, Swift/AppKit).
+- v1.7.0 (2026-10-28): master file table scanning, file index with size on disk, view tabs (Files with search and
+  filters, File types, Duplicates, Suggestions, Changes, Delete list with Recycle Bin), multi-ring chart, export to HTML/CSV,
+  live updates, self-test and screenshot modes. Windows only; macOS keeps the v1.6 feature set.
