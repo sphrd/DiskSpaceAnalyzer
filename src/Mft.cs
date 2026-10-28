@@ -270,7 +270,9 @@ namespace DiskSpaceAnalyzer
                                 ushort af = *(ushort*)(a + 12);
                                 long allocSize = *(long*)(a + 40), dataSize = *(long*)(a + 48);
                                 long onDisk = (af & 0x8001) != 0 && len >= 72 ? *(long*)(a + 64) : allocSize;
-                                alloc[target] += onDisk;
+                                // NTFS's own files (records 0-15) have special named streams, e.g. $BadClus:$Bad spans the
+                                // whole volume; only their main stream is counted.
+                                if (unnamed || target >= 16) alloc[target] += onDisk;
                                 if (unnamed) { bytes[target] = dataSize; progress.BytesSeen += dataSize; }
                             }
                             break;

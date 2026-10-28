@@ -56,9 +56,10 @@ namespace DiskSpaceAnalyzer
             types.AddRange(FileTypes.Categories);
             fileType = new ChoiceBox("", types.ToArray());
             fileMinSize = new ChoiceBox("", "Any size", "1 MB or more", "10 MB or more", "100 MB or more", "1 GB or more");
-            fileAge = new ChoiceBox("", "Any date", "Not changed for 3 months", "Not changed for 6 months", "Not changed for 1 year",
-                "Not changed for 2 years", "Not changed for 5 years");
+            fileAge = new ChoiceBox("", "Any date", "Older than 3 months", "Older than 6 months", "Older than 1 year", "Older than 2 years", "Older than 5 years");
+            tips.SetToolTip(fileAge, "Files not changed (modified) for at least this long");
             foreach (var c in new[] { fileType, fileMinSize, fileAge }) c.SelectedIndexChanged += (s, e) => FillFiles();
+            tips.SetToolTip(fileAge, "Files not changed (modified) for at least this long");
             tips.SetToolTip(fileSearch.Box, "Part of a name, or a pattern with * and ?. Several patterns: separate them with ; (Ctrl+F)");
             var files = NewList(new[] { "Name", "Size", "% of folder", "Folder", "Type", "Modified" },
                 new[] { "name", "size", "size", "folder", "cat", "mod" }, new[] { 260, 90, 150, 360, 110, 140 }, 2);

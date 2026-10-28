@@ -169,7 +169,7 @@ namespace DiskSpaceAnalyzer
             string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
             if (targets.Any(t => !t.ContentsOnly && !t.RecycleBin && (IsWithin(t.Path, win) || IsWithin(t.Path, pf) || IsWithin(t.Path, pf86))))
                 msg += "\n\nWARNING: this includes Windows or Program Files content. Deleting it can break Windows or installed programs.";
-            if (MessageBox.Show(this, msg, AppName + (recycle ? " - move to Recycle Bin" : " - confirm permanent delete"), MessageBoxButtons.YesNo,
+            if (SelfTestDir == null && MessageBox.Show(this, msg, AppName + (recycle ? " - move to Recycle Bin" : " - confirm permanent delete"), MessageBoxButtons.YesNo,
                 recycle ? MessageBoxIcon.Question : MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return null;
 
             DirNode target = current;
@@ -205,7 +205,7 @@ namespace DiskSpaceAnalyzer
                 : string.Format("Freed {0}. {1:N0} files deleted{2}{3}.", Fmt.Size(Math.Max(0, freed)), job.FilesDeleted, skipped,
                     job.Errors.Count > 0 ? string.Format(", {0:N0} items could not be deleted", job.Errors.Count) : "");
 
-            if (job.Errors.Count > 0)
+            if (job.Errors.Count > 0 && SelfTestDir == null)
             {
                 string err = string.Join("\n", job.Errors.Take(20).Select(e => Fmt.Shorten(e, 160)));
                 if (job.Errors.Count > 20) err += string.Format("\n... and {0:N0} more", job.Errors.Count - 20);

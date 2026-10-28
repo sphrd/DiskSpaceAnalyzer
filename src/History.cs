@@ -195,6 +195,7 @@ namespace DiskSpaceAnalyzer
             var prev = PrevOf(d);
             if (r == null || prev == null) return "";
             long delta = d.Size - prev.Size;
+            if (delta == 0) return string.Format("  -  no change since the scan of {0:yyyy-MM-dd HH:mm}", r.PreviousTime);
             return string.Format("  -  {0}{1} since the scan of {2:yyyy-MM-dd HH:mm}", delta >= 0 ? "+" : "-", Fmt.Size(Math.Abs(delta)), r.PreviousTime);
         }
 

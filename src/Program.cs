@@ -18,7 +18,7 @@ namespace DiskSpaceAnalyzer
         static int Main(string[] args)
         {
             // Headless mode: DiskSpaceAnalyzer.exe --cli scan <folder>  (--scan <folder> is kept as an alias)
-            if (args.Length >= 1 && args[0] == "--cli" && !(args.Length == 4 && args[1] == "screenshot")) return Headless(args);
+            if (args.Length >= 1 && args[0] == "--cli" && !(args.Length == 4 && args[1] == "screenshot") && !(args.Length == 3 && args[1] == "selftest")) return Headless(args);
             if (args.Length == 2 && args[0] == "--scan") return Headless(new[] { "--cli", "scan", args[1] });
 
             try { SetCurrentProcessExplicitAppUserModelID("sphrd.DiskSpaceAnalyzer"); } catch (Exception) { }
@@ -30,6 +30,14 @@ namespace DiskSpaceAnalyzer
             {
                 Application.Run(new MainForm(args[3]) { ShotDir = System.IO.Path.GetFullPath(args[2]) });
                 return 0;
+            }
+            // End-to-end self-test of live updates, the delete list, Recycle Bin, contents-only delete, duplicates and export:
+            // DiskSpaceAnalyzer.exe --cli selftest <empty scratch folder>   (exit code 0 = passed; details in selftest.log there)
+            if (args.Length == 3 && args[0] == "--cli" && args[1] == "selftest")
+            {
+                var form = new MainForm(SelfTest.Prepare(args[2])) { SelfTestDir = System.IO.Path.GetFullPath(args[2]) };
+                Application.Run(form);
+                return form.SelfTestFailed ? 1 : 0;
             }
             try { Application.Run(new MainForm(args.Length > 0 ? args[0] : null)); }
             catch (Exception ex)

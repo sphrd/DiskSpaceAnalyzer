@@ -305,7 +305,7 @@ namespace DiskSpaceAnalyzer
                 if (!string.IsNullOrEmpty(initialPath)) ScanPath(initialPath);
                 else ScanPath(Path.GetPathRoot(Environment.SystemDirectory));
                 // Look for a newer release in the background; silent unless there is one.
-                if (ShotDir == null)
+                if (ShotDir == null && SelfTestDir == null)
                 {
                     var later = new System.Windows.Forms.Timer { Interval = 3000 };
                     later.Tick += (s2, e2) => { later.Dispose(); updates.Check(false); };
@@ -528,6 +528,7 @@ namespace DiskSpaceAnalyzer
                 result.Name, Fmt.Size(result.Size), result.Files, result.Dirs, sw.Elapsed.TotalSeconds, s.Method,
                 s.Cancelled ? "  (stopped - partial results)" : "");
             if (ShotDir != null && !shotsStarted) { shotsStarted = true; RunShots(); }
+            if (SelfTestDir != null && !shotsStarted) { shotsStarted = true; RunSelfTest(); }
         }
 
         /// <summary>Deepest scanned folder under root that matches fullPath (root itself if nothing deeper matches).</summary>
