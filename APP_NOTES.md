@@ -304,4 +304,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
   step shown in the About-style app dialog (no banner); first native macOS version (universal .dmg, Swift/AppKit).
 - v1.7.0 (2026-10-28): master file table scanning, file index with size on disk, view tabs (Files with search and
   filters, File types, Duplicates, Suggestions, Changes, Delete list with Recycle Bin), multi-ring chart, export to HTML/CSV,
-  live updates, self-test and screenshot modes. Windows only; macOS keeps the v1.6 feature set.
+  live updates, self-test and screenshot modes. macOS has the same views (no master file table; Trash instead of the
+  Recycle Bin; FSEvents; iCloud dataless files count 0 on disk; shortcuts ⇧⌘D add to delete list, ⌘F search, ⇧⌘E export).

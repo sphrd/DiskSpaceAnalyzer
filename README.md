@@ -89,9 +89,13 @@ open list, slice for row, and hovering one highlights the other)
 - **No installer, no runtime download.** A single small `.exe` that runs on the
   .NET Framework 4.x built into every Windows 10/11 machine.
 
-The macOS version has the scanning, contents, chart, delete and update features;
-the new views (Files, File types, Duplicates, Suggestions, Changes, Delete list)
-are Windows-only for now.
+The macOS version has the same views and tools, except reading the master file
+table (an NTFS feature): it uses the Trash instead of the Recycle Bin, finds
+iCloud files that are not downloaded (they take no space), suggests Mac caches
+(Xcode DerivedData and simulators, Homebrew, `~/Library/Caches`, logs, the Trash...)
+and watches folders with FSEvents. Shortcuts: <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> adds to the
+delete list, <kbd>⌘</kbd><kbd>F</kbd> searches files, <kbd>⇧</kbd><kbd>⌘</kbd><kbd>E</kbd> exports,
+<kbd>⌘</kbd><kbd>⌫</kbd> deletes.
 ## Download
 
 Grab `DiskSpaceAnalyzer.exe` (Windows) or `DiskSpaceAnalyzer-macOS.dmg` (macOS) from the
