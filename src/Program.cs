@@ -7,8 +7,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Fast disk space analyzer and cleaner for Windows")]
 [assembly: AssemblyProduct("Disk Space Analyzer")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 sphrd - MIT License")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.5.0.0")]
+[assembly: AssemblyFileVersion("1.5.0.0")]
 
 namespace DiskSpaceAnalyzer
 {
@@ -22,6 +22,7 @@ namespace DiskSpaceAnalyzer
             if (args.Length == 2 && args[0] == "--scan") return Headless(new[] { "--cli", "scan", args[1] });
 
             try { SetCurrentProcessExplicitAppUserModelID("sphrd.DiskSpaceAnalyzer"); } catch (Exception) { }
+            Updater.CleanUp();   // the exe replaced by the last update, if any
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             try { Application.Run(new MainForm(args.Length > 0 ? args[0] : null)); }

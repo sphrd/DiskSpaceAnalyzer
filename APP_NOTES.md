@@ -13,6 +13,8 @@ patterns (Part 3) are applied through the WinForms mapping below.
 | Theme tokens (palette, fonts), drawing helpers, DWM interop | `src/Theme.cs` |
 | Widgets: RoundButton, RoundedPanel, PathInput, TabStrip, PillScrollBar, ScrollHost, BusyOverlay, Spinner, ScanBar, DarkRenderer, DarkTreeView, TreeHeader | `src/Widgets.cs` |
 | List view (rows, bars, header, empty-state hint) + sorting | `src/Controls.cs` |
+| Self-update (GitHub latest release, download, verify, swap) and the update banner | `src/Updater.cs` |
+| About window (logo, version, author sphrd, repo link, Check for updates) | `src/About.cs` |
 | Pie chart pane (donut linked to the contents list) | `src/Chart.cs` |
 | Scanner / deleter / interop (domain, not UI) | `src/Scanner.cs`, `src/Deleter.cs`, `src/Native.cs` |
 | Asset generator (icon `.ico`, 256 px `app.png` for the README, 1280x640 `social-preview.png` for GitHub) | `tools/make_icon.ps1` (run by every build) |
@@ -81,6 +83,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - 2026-10-28: "no, make the right one a darker blue, top left one darker than that, and bottom left one, lighter than the
   right one. so like a shade going from top left to bottom left from dark blue to light blue. use mainstream good
   looking shades. point out where i can adjust colors manually"
+- 2026-10-28: "when someone has the app downloaded, and a newer release is available, how to add an update manager section?
+  to prompt them and take them to the download page. and then download and replace current version."
+- 2026-10-28: "also add about, and check for updates menu to the app. about shows version and author as sphrd. after that
+  commit and push all, replace the release."
 - 2026-10-28: "reduce the default app size. it doesnt fit in my screen." (1920x1080 at 125 %: 1500x880 became
   1875x995 px and `CenterScreen` pushed it below the taskbar.)
 
@@ -131,6 +137,23 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - The former toolbar **Stop** button became the overlay's **Cancel** (same action; Stop was only usable while scanning).
 
 ## Decisions and gotchas
+
+- **Updates:** 3 s after start the app asks `api.github.com/repos/sphrd/DiskSpaceAnalyzer/releases/latest` (no token;
+  drafts and pre-releases are never offered). If the tag (`vX.Y.Z`) is newer than the exe's `AssemblyVersion`, an
+  attention banner (warn tokens, §2.4) offers Update now / What's new / Later; automatic checks are silent otherwise.
+  Manual check: Help > Check for updates, the About window's button, or the version label at the bottom right.
+- Help button (secondary, right end of the toolbar's second row, under Run as administrator) opens a dark menu: Check
+  for updates, About Disk Space Analyzer (F1). The logo drawing lives in `Theme.DrawLogo` (chart pane + About). Update now: download `DiskSpaceAnalyzer.exe` to
+  `<exe>.download` with progress and Cancel, check its size and the SHA-256 `digest` GitHub reports for the asset,
+  rename the running exe to `<exe>.old` (Windows allows renaming a running exe), move the download into place, then
+  Restart now. The next start deletes `.old` / `.download`, retrying for ~15 s because the previous process may still
+  be closing. If the folder is not writable (probed by creating a file), the banner links to the release page instead.
+  .NET 4.x needs TLS 1.2 switched on explicitly for GitHub; GitHub needs a User-Agent header.
+- **Releasing for the updater:** the tag must be `v` + the new `AssemblyVersion` (higher than before) and the asset must
+  be named exactly `DiskSpaceAnalyzer.exe`; otherwise the banner only links to the release page. Installs older than
+  v1.5.0 have no updater: those users must download v1.5.0 once by hand.
+- Tested end to end with a local build labelled 1.3.9 against the published v1.4.0: banner shown, download, checksum,
+  swap, restart into 1.4.0; installed file identical to the release asset.
 
 - Window placement: `FormStartPosition.CenterScreen` opened the window off-centre with its bottom under the taskbar
   (y 224..1083 on a 1020 px working area). The form now sets `StartPosition = Manual` and centres itself in the working
@@ -200,3 +223,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
   ordered like the list (small rows merged); free space is an empty gap ending at 12 o'clock; app logo shown before a
   scan and morphing into the chart; tile-less shaded logo everywhere; default window 1280x760, centred in the working
   area. ~123 KB.
+- v1.5.0 (2026-10-28): self-update from GitHub releases (banner, download, checksum, swap, restart), Help menu with
+  Check for updates and About (version, author sphrd). ~140 KB.

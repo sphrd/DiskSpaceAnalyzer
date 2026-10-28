@@ -27,6 +27,8 @@ namespace DiskSpaceAnalyzer
         public static readonly Color LOGO_BOTTOM_LEFT = Hex(0x81a2eb);
         public static readonly Color WARN = Hex(0xe0a030);
         public static readonly Color WARN_FG = Hex(0xffd27a);
+        public static readonly Color WARN_BG = Hex(0x3d3522);
+        public static readonly Color WARN_BORDER = Hex(0x5a4a2a);
         public static readonly Color PILL = Hex(0x5c6470);
         public static readonly Color PILL_HOVER = Hex(0x7a828e);
 
@@ -81,6 +83,22 @@ namespace DiskSpaceAnalyzer
             using (var b = new SolidBrush(fill)) g.FillPath(b, p);
             g.SmoothingMode = sm;
             g.PixelOffsetMode = pm;
+        }
+
+        /// <summary>
+        /// App logo (no tile) in a circle: LOGO_TOP_LEFT upper-left, LOGO_RIGHT right half, LOGO_BOTTOM_LEFT lower-left,
+        /// mouth facing left. Used by the chart pane and the About window; the exe icon uses the same colours.
+        /// </summary>
+        public static void DrawLogo(Graphics g, Rectangle circle, float alpha)
+        {
+            if (alpha <= 0) return;
+            int a = (int)Math.Round(255 * Math.Min(1f, alpha));
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            const float mouth = 30, under = 6;
+            using (var b = new SolidBrush(Color.FromArgb(a, LOGO_TOP_LEFT))) g.FillPie(b, circle, 180 + mouth, 90 - mouth + under);
+            using (var b = new SolidBrush(Color.FromArgb(a, LOGO_BOTTOM_LEFT))) g.FillPie(b, circle, 90 - under, 90 - mouth + under);
+            using (var b = new SolidBrush(Color.FromArgb(a, LOGO_RIGHT))) g.FillPie(b, circle, -90, 180);
         }
 
         public static void DrawFolder(Graphics g, Rectangle r, Color c)

@@ -19,7 +19,7 @@ $sources = Get-ChildItem "$PSScriptRoot\src\*.cs" | ForEach-Object { $_.FullName
 try {
     & $csc /nologo /target:winexe /platform:anycpu /optimize+ /unsafe+ /debug- `
         "/out:$built" "/win32icon:$icon" "/win32manifest:$PSScriptRoot\src\app.manifest" `
-        /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+        /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll `
         $sources
     if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)" }
     try { Move-Item $built $final -Force }

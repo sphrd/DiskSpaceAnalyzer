@@ -151,20 +151,8 @@ namespace DiskSpaceAnalyzer
 
         static Color Fade(Color c, float a) { return Color.FromArgb((int)Math.Round(255 * Math.Max(0, Math.Min(1, a))), c); }
 
-        /// <summary>
-        /// App logo (no tile), drawn on the chart's own circle (same centre and diameter): LOGO_TOP_LEFT upper-left,
-        /// LOGO_RIGHT right half, LOGO_BOTTOM_LEFT lower-left section, mouth facing left.
-        /// </summary>
-        void DrawLogo(Graphics g, Rectangle circle, float alpha)
-        {
-            if (alpha <= 0) return;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            const float mouth = 30, under = 6;
-            using (var b = new SolidBrush(Fade(Theme.LOGO_TOP_LEFT, alpha))) g.FillPie(b, circle, 180 + mouth, 90 - mouth + under);
-            using (var b = new SolidBrush(Fade(Theme.LOGO_BOTTOM_LEFT, alpha))) g.FillPie(b, circle, 90 - under, 90 - mouth + under);
-            using (var b = new SolidBrush(Fade(Theme.LOGO_RIGHT, alpha))) g.FillPie(b, circle, -90, 180);
-        }
+        void DrawLogo(Graphics g, Rectangle circle, float alpha) { Theme.DrawLogo(g, circle, alpha); }
+
         void DrawLogoNote(Graphics g)
         {
             if (logoNote.Length == 0) return;

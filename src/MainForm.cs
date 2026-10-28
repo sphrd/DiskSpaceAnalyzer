@@ -41,6 +41,7 @@ namespace DiskSpaceAnalyzer
         bool scanning;
         ScanRoot scanRoot;
         ScanBar scanBar;
+        UpdateBanner updateBanner;
         /// <summary>Scanned tree of the root that holds the current selection (null when that root is not scanned).</summary>
         DirNode root { get { return active != null ? active.Node : null; } }
         List<FileEntry> topFiles = new List<FileEntry>();
@@ -51,7 +52,8 @@ namespace DiskSpaceAnalyzer
 
         readonly PathInput pathBox;
         readonly Label pathLabel;
-        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
+        readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin, btnHelp;
+        readonly ContextMenuStrip helpMenu;
         readonly Panel toolbar;
         readonly SplitContainer split, split2;
         readonly PieChart chart;
@@ -106,8 +108,20 @@ namespace DiskSpaceAnalyzer
             btnExplorer = Btn("Show in Explorer", ButtonKind.Secondary, "Open the selected item in Windows Explorer", ShowInExplorer);
             btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
 
+            // Help menu: check for updates, about.
+            helpMenu = new ContextMenuStrip
+            {
+                Renderer = new DarkRenderer(), BackColor = Theme.SURFACE, ForeColor = Theme.FG, Font = Theme.FONT,
+                ShowImageMargin = false, Padding = new Padding(0, S(4), 0, S(4)), DropShadowEnabled = !Theme.HasDwmCorners
+            };
+            helpMenu.Items.Add(new ToolStripMenuItem("Check for updates", null, (s, e) => updateBanner.Check(true)) { ForeColor = Theme.FG });
+            helpMenu.Items.Add(new ToolStripSeparator());
+            helpMenu.Items.Add(new ToolStripMenuItem("About Disk Space Analyzer", null, (s, e) => ShowAbout()) { ForeColor = Theme.FG, ShortcutKeyDisplayString = "F1" });
+            helpMenu.Opened += (s, e) => Theme.RoundPopup(helpMenu.Handle);
+            btnHelp = Btn("Help", ButtonKind.Secondary, "Check for updates, About (F1)", () => helpMenu.Show(btnHelp, new Point(btnHelp.Width - helpMenu.PreferredSize.Width, btnHelp.Height + S(2))));
+
             toolbar = new Panel { Dock = DockStyle.Top, BackColor = Theme.BG };
-            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete });
+            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete, btnHelp });
             toolbar.Layout += (s, e) => LayoutToolbar();
 
             // Context menu
@@ -234,6 +248,20 @@ namespace DiskSpaceAnalyzer
             status.Controls.Add(statusLabel);
             status.Controls.Add(driveLabel);
 
+            // Version in the status line; click it to check for updates by hand.
+            var versionLink = new Label
+            {
+                Text = "v" + Updater.Short(Updater.Current), Dock = DockStyle.Right, AutoSize = true, Font = Theme.FONT_9,
+                ForeColor = Theme.MUTED, BackColor = Theme.BG, Cursor = Cursors.Hand, TextAlign = ContentAlignment.MiddleRight,
+                Padding = new Padding(S(16), S(8), S(12), 0)
+            };
+            tips.SetToolTip(versionLink, "Check for updates");
+            versionLink.MouseEnter += (s, e) => versionLink.ForeColor = Theme.ACCENT;
+            versionLink.MouseLeave += (s, e) => versionLink.ForeColor = Theme.MUTED;
+            versionLink.Click += (s, e) => updateBanner.Check(true);
+            status.Controls.Add(versionLink);
+            updateBanner = new UpdateBanner { Dock = DockStyle.Top, CanRestart = () => !busy };
+
             overlay = new BusyOverlay();
             overlay.CancelButton.Click += (s, e) =>
             {
@@ -242,8 +270,8 @@ namespace DiskSpaceAnalyzer
                 overlay.CancelButton.Enabled = false;
             };
 
-            // Docking runs from the last-added control back: status (bottom), toolbar (top), scan bar (top, under the
-            // toolbar), then the panes fill the rest.
+            // Docking runs from the last-added control back: status (bottom), toolbar (top), update banner (top, under the
+            // toolbar, only while it has something to say), scan bar (top, under those), then the panes fill the rest.
             scanBar = new ScanBar { Dock = DockStyle.Top };
             scanBar.CancelButton.Click += (s, e) =>
             {
@@ -253,6 +281,7 @@ namespace DiskSpaceAnalyzer
             };
             Controls.Add(split);
             Controls.Add(scanBar);
+            Controls.Add(updateBanner);
             Controls.Add(toolbar);
             Controls.Add(status);
             Controls.Add(overlay);
@@ -285,6 +314,10 @@ namespace DiskSpaceAnalyzer
                 // The system drive is analyzed automatically; other drives are listed and scanned on demand.
                 if (!string.IsNullOrEmpty(initialPath)) ScanPath(initialPath);
                 else ScanPath(Path.GetPathRoot(Environment.SystemDirectory));
+                // Look for a newer release in the background; silent unless there is one.
+                var later = new System.Windows.Forms.Timer { Interval = 3000 };
+                later.Tick += (s2, e2) => { later.Dispose(); updateBanner.Check(false); };
+                later.Start();
             };
             FormClosing += (s, e) => { if (scanner != null) scanner.Cancel(); };
             UpdateButtons();
@@ -335,6 +368,9 @@ namespace DiskSpaceAnalyzer
                 b.Bounds = new Rectangle(x, y, p.Width, h);
                 x += p.Width + gap;
             }
+            // Help menu at the right end of the second row, under "Run as administrator".
+            var hp = btnHelp.GetPreferredSize(Size.Empty);
+            btnHelp.Bounds = new Rectangle(w - hp.Width, y, hp.Width, h);
             int total = y + h + S(10);
             if (toolbar.Height != total) toolbar.Height = total;
         }
@@ -342,6 +378,7 @@ namespace DiskSpaceAnalyzer
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+            if (e.KeyCode == Keys.F1) { ShowAbout(); e.Handled = true; return; }
             if (pathBox.Box.Focused) return;
             if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.F5) { RescanSelected(); e.Handled = true; }
@@ -350,6 +387,11 @@ namespace DiskSpaceAnalyzer
             { ScanPath(((ScanRoot)tree.SelectedNode.Tag).Path); e.Handled = true; }
             else if (e.KeyCode == Keys.Enter && lastView != tree) { OpenSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.C && e.Control) { CopyPath(); e.Handled = true; }
+        }
+
+        void ShowAbout()
+        {
+            using (var f = new AboutForm(() => updateBanner.Check(true))) f.ShowDialog(this);
         }
 
         // ---------------------------------------------------------------- scanning
