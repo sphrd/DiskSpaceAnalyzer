@@ -8,7 +8,7 @@ extension MainWindowController {
         btnBasketClear.tip = "Empty the delete list (nothing is deleted)"
         btnBasketTrash.tip = "Move everything on the list to the Trash: restorable; the space is freed when the Trash is emptied"
         btnBasketDelete.tip = "Delete everything on the list now, bypassing the Trash"
-        let p = Page("Delete list", [Column("name", "Name", 220), Column("size", "Size", 84, true), Column("size", "% of list", 150, true),
+        let p = Page("Delete list", [Column("name", "Name", 200), Column("size", "Size", 80, true), Column("size", "% of list", 125, true),
                                      Column("folder", "Location", 330), Column("note", "Note", 200)],
                      barColumn: 2, bar: ActionBar([btnBasketRemove, btnBasketClear, btnBasketTrash, btnBasketDelete], right: [btnBasketTrash, btnBasketDelete]))
         p.chartTitle = "Delete list"

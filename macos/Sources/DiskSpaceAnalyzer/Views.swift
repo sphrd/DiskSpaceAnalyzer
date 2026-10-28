@@ -62,6 +62,28 @@ struct Column {
     init(_ key: String, _ title: String, _ width: CGFloat, _ right: Bool = false) { self.key = key; self.title = title; self.width = width; self.right = right }
 }
 
+/// Muted caption text above a list: one line, or two when it needs them (then the last line ends in an ellipsis).
+final class CaptionView: NSView {
+    var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
+    override var isFlipped: Bool { true }
+    static let lineH = ceil(Theme.font9.ascender - Theme.font9.descender + Theme.font9.leading)
+
+    private var attributes: [NSAttributedString.Key: Any] {
+        let ps = NSMutableParagraphStyle()
+        ps.lineBreakMode = .byWordWrapping
+        return [.font: Theme.font9, .foregroundColor: T.MUTED, .paragraphStyle: ps]
+    }
+
+    func lines(width: CGFloat) -> CGFloat {
+        let h = (text as NSString).boundingRect(with: NSSize(width: width, height: 1000), options: [.usesLineFragmentOrigin], attributes: attributes).height
+        return h > CaptionView.lineH * 1.5 ? 2 : 1
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        (text as NSString).draw(with: bounds, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+    }
+}
+
 /// Flipped view that lays out its subviews through a closure.
 final class LayoutView: FlatView {
     var onLayout: ((NSRect) -> Void)?
@@ -189,7 +211,7 @@ final class ListCell: NSTableCellView {
 final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let title: String
     let root = LayoutView()
-    let caption = NSTextField(wrappingLabelWithString: "")
+    let caption = CaptionView()
     let bar: ActionBar?
     let table = HoverTable()
     let scroll = NSScrollView()
@@ -209,13 +231,6 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         self.title = title; self.columns = columns; self.barColumn = barColumn; self.bar = bar
         super.init()
         root.fill = T.SURFACE
-        caption.font = Theme.font9
-        caption.textColor = T.MUTED
-        caption.maximumNumberOfLines = 2
-        caption.lineBreakMode = .byWordWrapping
-        caption.cell?.truncatesLastVisibleLine = true
-        caption.drawsBackground = false
-        root.addSubview(caption)
         if let b = bar {
             root.addSubview(b)
             b.onHeightChange = { [weak self] in self?.root.needsLayout = true }
@@ -250,18 +265,17 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         scroll.backgroundColor = T.SURFACE
         scroll.borderType = .noBorder
         root.addSubview(scroll)
+        root.addSubview(caption)
         root.onLayout = { [weak self] r in self?.layoutPage(r) }
         root.isHidden = true
     }
 
     private func layoutPage(_ r: NSRect) {
         let w = r.width
-        let lineH = ceil(Theme.font9.ascender - Theme.font9.descender + Theme.font9.leading)
-        let textH = (caption.stringValue as NSString).boundingRect(with: NSSize(width: max(10, w - 8), height: 1000),
-                                                                   options: [.usesLineFragmentOrigin], attributes: [.font: Theme.font9]).height
-        let lines: CGFloat = textH > lineH * 1.5 ? 2 : 1
+        let lineH = CaptionView.lineH
+        let lines = caption.lines(width: max(10, w - 8))
         let capH = lineH * lines + 10
-        caption.frame = NSRect(x: 4, y: 5, width: max(10, w - 8), height: lineH * lines + 2)
+        caption.frame = NSRect(x: 4, y: 5, width: max(10, w - 8), height: lineH * lines + 3)
         var y = capH
         if let b = bar {
             let h = b.arrange(width: w)
@@ -273,8 +287,8 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func setCaption(_ s: String) {
-        if caption.stringValue == s { return }
-        caption.stringValue = s
+        if caption.text == s { return }
+        caption.text = s
         root.needsLayout = true
     }
 

@@ -11,8 +11,8 @@ extension MainWindowController {
     var activePage: Page { pages[min(max(0, viewTabs.selectedIndex), pages.count - 1)] }
 
     func buildViews() {
-        pContents = Page("Contents", [Column("name", "Name", 230), Column("size", "Size", 84, true), Column("size", "% of folder", 150, true),
-                                      Column("change", "Change", 84, true), Column("files", "Files", 74, true), Column("dirs", "Folders", 66, true),
+        pContents = Page("Contents", [Column("name", "Name", 210), Column("size", "Size", 80, true), Column("size", "% of folder", 125, true),
+                                      Column("change", "Change", 80, true), Column("files", "Files", 74, true), Column("dirs", "Folders", 66, true),
                                       Column("mod", "Modified", 128)], barColumn: 2, bar: nil)
         pContents.followsFolder = true
         pContents.fill = { [unowned self] in if let c = self.current, self.isAttached(c) { self.showContents(c) } }
@@ -23,7 +23,7 @@ extension MainWindowController {
         fileSearch.toolTip = "Part of a name, or a pattern with * and ?. Several patterns: separate them with ; (⌘F)"
         fileAge.tip = "Files not changed (modified) for at least this long"
         for c in [fileType, fileMinSize, fileAge] { c.onChange = { [unowned self] _ in self.fillFiles() } }
-        pFiles = Page("Files", [Column("name", "Name", 230), Column("size", "Size", 84, true), Column("size", "% of folder", 150, true),
+        pFiles = Page("Files", [Column("name", "Name", 210), Column("size", "Size", 80, true), Column("size", "% of folder", 125, true),
                                 Column("folder", "Folder", 330), Column("cat", "Type", 110), Column("mod", "Modified", 128)],
                       barColumn: 2, bar: ActionBar([fileSearch, fileType, fileMinSize, fileAge]))
         pFiles.followsFolder = true

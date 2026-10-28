@@ -112,8 +112,8 @@ struct BinReader {
 
 extension MainWindowController {
     func buildChangesPage() -> Page {
-        let p = Page("Changes", [Column("name", "Folder", 360), Column("change", "Change", 100, true), Column("size", "Now", 90, true),
-                                 Column("files", "Before", 90, true)], barColumn: -1, bar: nil)
+        let p = Page("Changes", [Column("name", "Folder", 270), Column("change", "Change", 90, true), Column("size", "Now", 80, true),
+                                 Column("files", "Before", 80, true)], barColumn: -1, bar: nil)
         p.chartTitle = "Growth"
         p.chartScope = "of the growth"
         p.empty = "Nothing grew since the previous scan."

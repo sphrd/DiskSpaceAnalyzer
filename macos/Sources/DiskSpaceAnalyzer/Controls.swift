@@ -206,8 +206,6 @@ final class ActionBar: NSView {
     private func isRight(_ v: BarItem) -> Bool { right.contains(ObjectIdentifier(v)) }
     private func pref(_ v: BarItem) -> CGFloat { v.preferredSize.width }
 
-    override func draw(_ dirtyRect: NSRect) { T.SURFACE.setFill(); dirtyRect.fill() }
-
     /// Lays the items out for a width and returns the height needed.
     @discardableResult
     func arrange(width: CGFloat) -> CGFloat {

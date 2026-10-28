@@ -12,7 +12,7 @@ final class Suggestion {
 extension MainWindowController {
     func buildSuggestionsPage() -> Page {
         btnLookAgain.tip = "Measure the suggestions again"
-        let p = Page("Suggestions", [Column("name", "Name", 210), Column("size", "Size", 84, true), Column("size", "% of suggestions", 150, true),
+        let p = Page("Suggestions", [Column("name", "Name", 190), Column("size", "Size", 80, true), Column("size", "% of suggestions", 135, true),
                                      Column("folder", "Location", 280), Column("note", "What deleting means", 420)],
                      barColumn: 2, bar: ActionBar([btnLookAgain]))
         p.chartTitle = "Cleanup suggestions"
