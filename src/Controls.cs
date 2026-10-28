@@ -50,7 +50,7 @@ namespace DiskSpaceAnalyzer
         {
             return new ItemInfo
             {
-                IsDir = true, Dir = d, Name = d.Name, Size = d.Size, Files = d.Files, Dirs = d.Dirs,
+                IsDir = true, Dir = d, Name = d.Name, Size = d.Size, Files = d.Files, Dirs = d.Dirs, Modified = d.Modified,
                 Percent = parentSize > 0 ? 100.0 * d.Size / parentSize : 0
             };
         }
@@ -59,7 +59,7 @@ namespace DiskSpaceAnalyzer
         {
             return new ItemInfo
             {
-                File = f, Name = f.Name, Size = f.Size, Files = 1, Modified = f.Modified,
+                File = f, Name = f.OnlineOnly ? f.Name + "  (online-only)" : f.Name, Size = f.Size, Files = 1, Modified = f.Modified,
                 Percent = parentSize > 0 ? 100.0 * f.Size / parentSize : 0
             };
         }

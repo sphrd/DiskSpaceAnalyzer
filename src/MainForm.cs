@@ -54,6 +54,7 @@ namespace DiskSpaceAnalyzer
         readonly Label pathLabel;
         readonly RoundButton btnBrowse, btnScan, btnUp, btnRescan, btnExplorer, btnDelete, btnAdmin;
         readonly TitleBar titleBar;
+        readonly Segmented measure;
         readonly Panel toolbar;
         readonly SplitContainer split, split2;
         readonly PieChart chart;
@@ -109,8 +110,12 @@ namespace DiskSpaceAnalyzer
             btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
 
 
+            measure = new Segmented("Size", "Size on disk");
+            measure.SelectedIndexChanged += (s, e) => SetMeasure(measure.SelectedIndex == 1);
+            tips.SetToolTip(measure, "Size: file lengths, as Explorer shows them. Size on disk: the space really used (compression, clusters, online-only cloud files)");
+
             toolbar = new Panel { Dock = DockStyle.Top, BackColor = Theme.BG };
-            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete });
+            toolbar.Controls.AddRange(new Control[] { pathLabel, pathBox, btnBrowse, btnScan, btnAdmin, btnUp, btnRescan, btnExplorer, btnDelete, measure });
             toolbar.Layout += (s, e) => LayoutToolbar();
 
             // Context menu
@@ -409,6 +414,8 @@ namespace DiskSpaceAnalyzer
                 b.Bounds = new Rectangle(x, y, p.Width, h);
                 x += p.Width + gap;
             }
+            var ms = measure.GetPreferredSize(Size.Empty);
+            measure.Bounds = new Rectangle(w - ms.Width, y, ms.Width, h);
             int total = y + h + S(10);
             if (toolbar.Height != total) toolbar.Height = total;
         }
@@ -484,7 +491,7 @@ namespace DiskSpaceAnalyzer
                 roots.Add(r);
                 SortRoots();
             }
-            var s = new Scanner(TopCount);
+            var s = new Scanner();
             scanner = s;
             scanRoot = r;
             r.Scanning = true;
@@ -497,7 +504,7 @@ namespace DiskSpaceAnalyzer
             var sw = Stopwatch.StartNew();
             DirNode result = null;
             Exception error = null;
-            try { await RunThread(() => result = s.Run(path)); }
+            try { await RunThread(() => result = s.Run(path, true)); }
             catch (Exception ex) { error = ex; }
             sw.Stop();
             r.Scanning = false;
@@ -513,7 +520,7 @@ namespace DiskSpaceAnalyzer
             }
 
             r.Node = result;
-            r.Top = s.TopFiles;
+            r.Top = Largest(result);
             RefreshCapacity(r);
             // Keep the user's place: map a selection inside the old tree onto the new one; otherwise stay put,
             // unless nothing scanned was selected (e.g. at startup), then open the new result.
@@ -525,8 +532,8 @@ namespace DiskSpaceAnalyzer
             RefreshTree(target);
             if (active == r) FillLargest();
             UpdateDriveLabel();
-            statusLabel.Text = string.Format("{0}: {1} in {2:N0} files and {3:N0} folders - scanned in {4:0.00} s{5}",
-                result.Name, Fmt.Size(result.Size), result.Files, result.Dirs, sw.Elapsed.TotalSeconds,
+            statusLabel.Text = string.Format("{0}: {1} in {2:N0} files and {3:N0} folders - scanned in {4:0.00} s, {5}{6}",
+                result.Name, Fmt.Size(result.Size), result.Files, result.Dirs, sw.Elapsed.TotalSeconds, s.Method,
                 s.Cancelled ? "  (stopped - partial results)" : "");
         }
 
@@ -1142,54 +1149,69 @@ namespace DiskSpaceAnalyzer
                 if (a.Children != null) a.Children.Sort(DirNode.BySizeDesc);
         }
 
-        /// <summary>Largest-files list of the root that holds d (the active list if d is detached).</summary>
-        List<FileEntry> TopOf(DirNode d)
+        /// <summary>The largest files under a scanned tree (from the index, by the current measure).</summary>
+        static List<FileEntry> Largest(DirNode node)
         {
-            var r = RootOf(d.Top);
-            return r != null ? r.Top : topFiles;
+            long c, s;
+            return FileIndex.Largest(node, TopCount, null, out c, out s);
+        }
+
+        /// <summary>Recomputes the largest-files list of the root that holds d after the tree changed.</summary>
+        void RecomputeTop(DirNode d)
+        {
+            var r = d != null ? RootOf(d.Top) : null;
+            if (r == null || r.Node == null) return;
+            r.Top = Largest(r.Node);
+            if (r == active) topFiles = r.Top;
         }
 
         void RemoveNode(DirNode dn)
         {
-            TopOf(dn).RemoveAll(f => f.Dir.IsUnder(dn));
             var p = dn.Parent;
             if (p == null) return;
             p.Children.Remove(dn);
-            for (var a = p; a != null; a = a.Parent) { a.Size -= dn.Size; a.Files -= dn.Files; a.Dirs -= dn.Dirs + 1; }
-            ResortUp(p);
+            p.AddUp(-dn.Bytes, -dn.Alloc, -dn.Files, -(dn.Dirs + 1));
             dn.Parent = null;
+            RecomputeTop(p);
         }
 
-        void ReplaceNode(DirNode old, DirNode fresh, List<FileEntry> freshTop)
+        void ReplaceNode(DirNode old, DirNode fresh)
         {
-            var list = TopOf(old);
-            list.RemoveAll(f => f.Dir.IsUnder(old));
             var p = old.Parent;
-            if (p == null) { var r = RootOf(old); if (r != null) r.Node = fresh; }
-            else
-            {
-                fresh.Name = old.Name;
-                fresh.Parent = p;
-                p.Children[p.Children.IndexOf(old)] = fresh;
-                long dS = fresh.Size - old.Size, dF = fresh.Files - old.Files, dD = fresh.Dirs - old.Dirs;
-                for (var a = p; a != null; a = a.Parent) { a.Size += dS; a.Files += dF; a.Dirs += dD; }
-                ResortUp(p);
-                old.Parent = null;
-            }
-            list.AddRange(freshTop);
-            list.Sort(FileEntry.BySizeDesc);
-            if (list.Count > TopCount) list.RemoveRange(TopCount, list.Count - TopCount);
+            if (p == null) { var r = RootOf(old); if (r != null) r.Node = fresh; RecomputeTop(fresh); return; }
+            fresh.Name = old.Name;
+            fresh.Modified = old.Modified;
+            fresh.Parent = p;
+            p.Children[p.Children.IndexOf(old)] = fresh;
+            p.AddUp(fresh.Bytes - old.Bytes, fresh.Alloc - old.Alloc, fresh.Files - old.Files, fresh.Dirs - old.Dirs);
+            old.Parent = null;
+            RecomputeTop(p);
         }
 
         void RemoveFile(FileEntry f)
         {
             var d = f.Dir;
             if (!IsAttached(d)) return;
-            d.LocalSize -= f.Size;
-            d.LocalFiles--;
-            for (var a = d; a != null; a = a.Parent) { a.Size -= f.Size; a.Files--; }
-            ResortUp(d.Parent);
-            TopOf(d).RemoveAll(t => t.Dir == d && string.Equals(t.Name, f.Name, StringComparison.OrdinalIgnoreCase));
+            d.RemoveFileRec(f.Name);
+            RecomputeTop(d);
+        }
+
+        /// <summary>Switches every view between file size and size on disk.</summary>
+        void SetMeasure(bool onDisk)
+        {
+            if (DirNode.OnDisk == onDisk) return;
+            DirNode.OnDisk = onDisk;
+            foreach (var r in roots)
+                if (r.Node != null) { r.Node.ResortAll(); r.Top = Largest(r.Node); }
+            topFiles = active != null ? active.Top : new List<FileEntry>();
+            var keep = current;
+            current = null;
+            if (keep != null && IsAttached(keep)) RefreshTree(keep);
+            else if (active != null) { RefreshTree(null); }
+            FillLargest();
+            statusLabel.Text = onDisk
+                ? "Showing size on disk: the space files really take (compressed and sparse files less, small files a whole cluster, online-only cloud files nothing)."
+                : "Showing file size: the length of each file, as Explorer's Size column shows it.";
         }
 
         async void RescanSelected()
@@ -1202,7 +1224,7 @@ namespace DiskSpaceAnalyzer
 
             string path = dir.FullPath;
             var owner = RootOf(dir.Top);
-            var s = new Scanner(TopCount);
+            var s = new Scanner();
             scanner = s;
             scanRoot = owner;
             SetScanning(true, "Rescanning " + Fmt.Shorten(path, 80) + "...");
@@ -1218,7 +1240,7 @@ namespace DiskSpaceAnalyzer
             if (!Native.Exists(path)) { if (inside) target = dir.Parent; RemoveNode(dir); }
             else
             {
-                ReplaceNode(dir, fresh, s.TopFiles);
+                ReplaceNode(dir, fresh);
                 if (inside) target = FindByPath(fresh, here) ?? fresh;
             }
             if (target == null || !IsAttached(target)) target = dir.Parent;
@@ -1282,11 +1304,11 @@ namespace DiskSpaceAnalyzer
                 if (!sel[k].IsDir || !IsAttached(sel[k].Dir)) continue;
                 var dn = sel[k].Dir;
                 if (!Native.Exists(paths[k])) { RemoveNode(dn); continue; }
-                var s = new Scanner(TopCount);
+                var s = new Scanner();
                 DirNode fresh = null;
                 string p = paths[k];
                 await RunThread(() => fresh = s.Run(p));
-                ReplaceNode(dn, fresh, s.TopFiles);
+                ReplaceNode(dn, fresh);
                 if (target == dn) target = fresh;
             }
 

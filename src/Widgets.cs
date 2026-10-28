@@ -75,6 +75,93 @@ namespace DiskSpaceAnalyzer
         }
     }
 
+    /// <summary>
+    /// Segmented switch (two or more exclusive options in one rounded pill): BORDER track, the chosen option as an
+    /// ACCENT pill with BG text, the others MUTED (FG on hover).
+    /// </summary>
+    internal sealed class Segmented : Control
+    {
+        readonly string[] options;
+        int selected, hover = -1;
+        public event EventHandler SelectedIndexChanged;
+
+        public Segmented(params string[] options)
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            SetStyle(ControlStyles.Selectable, false);
+            this.options = options;
+            Font = Theme.FONT;
+            Cursor = Cursors.Hand;
+        }
+
+        public int SelectedIndex
+        {
+            get { return selected; }
+            set
+            {
+                if (selected == value) return;
+                selected = value;
+                Invalidate();
+                if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
+            }
+        }
+
+        int OptionWidth(int i) { return TextRenderer.MeasureText(options[i], Font, Size.Empty, TextFormatFlags.NoPadding).Width + Theme.S(24); }
+
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            int w = Theme.S(6);
+            for (int i = 0; i < options.Length; i++) w += OptionWidth(i);
+            return new Size(w, Font.Height + Theme.S(12));
+        }
+
+        Rectangle OptionRect(int i)
+        {
+            int x = Theme.S(3);
+            for (int k = 0; k < i; k++) x += OptionWidth(k);
+            return new Rectangle(x, Theme.S(3), OptionWidth(i), Height - Theme.S(6));
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(Parent != null ? Parent.BackColor : Theme.BG);
+            Theme.FillRound(g, ClientRectangle, Theme.S(8), Theme.SURFACE, Theme.BORDER);
+            for (int i = 0; i < options.Length; i++)
+            {
+                var r = OptionRect(i);
+                Color fore = !Enabled ? Theme.DISABLED_FG : i == selected ? Theme.BG : i == hover ? Theme.FG : Theme.MUTED;
+                if (i == selected) Theme.FillRound(g, r, Theme.S(6), Enabled ? Theme.ACCENT : Theme.DISABLED_BG, Enabled ? Theme.ACCENT : Theme.DISABLED_BG);
+                TextRenderer.DrawText(g, options[i], Font, r, fore,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            }
+        }
+
+        int HitTest(Point p)
+        {
+            for (int i = 0; i < options.Length; i++) if (OptionRect(i).Contains(p)) return i;
+            return -1;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = HitTest(e.Location);
+            if (h != hover) { hover = h; Invalidate(); }
+        }
+
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = -1; Invalidate(); }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            int h = HitTest(e.Location);
+            if (h >= 0 && Enabled && e.Button == MouseButtons.Left) SelectedIndex = h;
+        }
+
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
+    }
+
     /// <summary>Rounded SURFACE panel with a BORDER outline that turns ACCENT while it holds the focus.</summary>
     internal class RoundedPanel : Panel
     {

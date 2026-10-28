@@ -42,9 +42,11 @@ namespace DiskSpaceAnalyzer
             if (stdout == IntPtr.Zero || stdout == new IntPtr(-1)) AttachConsole(-1);
             try
             {
-                if (args.Length == 3 && args[1] == "scan") return ConsoleScan(args[2]);
+                if (args.Length >= 3 && args[1] == "scan") return ConsoleScan(args[2], Array.IndexOf(args, "--mft") > 0, Array.IndexOf(args, "--files") > 0);
                 Console.WriteLine();
-                Console.WriteLine("Usage: DiskSpaceAnalyzer.exe --cli scan <folder>");
+                Console.WriteLine("Usage: DiskSpaceAnalyzer.exe --cli scan <folder> [--mft] [--files]");
+                Console.WriteLine("  --mft    read a whole NTFS drive from its master file table (needs administrator rights)");
+                Console.WriteLine("  --files  also list the 10 largest files");
                 return 2;
             }
             catch (Exception ex)
@@ -55,19 +57,26 @@ namespace DiskSpaceAnalyzer
             }
         }
 
-        static int ConsoleScan(string path)
+        static int ConsoleScan(string path, bool mft, bool files)
         {
             var sw = Stopwatch.StartNew();
-            var root = new Scanner(10).Run(System.IO.Path.GetFullPath(path));
+            var s = new Scanner();
+            var root = s.Run(System.IO.Path.GetFullPath(path), mft);
             sw.Stop();
             Console.WriteLine();
-            Console.WriteLine("{0}\t{1} bytes\t{2} files\t{3} dirs\t{4:0.000} s", root.Name, root.Size, root.Files, root.Dirs, sw.Elapsed.TotalSeconds);
+            Console.WriteLine("{0}\t{1} bytes\t{2} on disk\t{3} files\t{4} dirs\t{5:0.000} s\t{6}", root.Name, root.Bytes, root.Alloc, root.Files, root.Dirs,
+                sw.Elapsed.TotalSeconds, s.Method);
             if (root.Children != null)
                 foreach (var c in root.Children)
-                    Console.WriteLine("  {0,-40} {1,15:N0} bytes  {2,10:N0} files", c.Name, c.Size, c.Files);
+                    Console.WriteLine("  {0,-40} {1,18:N0} bytes {2,18:N0} on disk {3,10:N0} files", c.Name, c.Bytes, c.Alloc, c.Files);
+            if (files)
+            {
+                long n, sz;
+                foreach (var f in FileIndex.Largest(root, 10, null, out n, out sz))
+                    Console.WriteLine("  file {0,18:N0}  {1}", f.Bytes, f.FullPath);
+            }
             return 0;
         }
-
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         static extern bool AttachConsole(int processId);
 

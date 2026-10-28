@@ -19,7 +19,53 @@ namespace DiskSpaceAnalyzer
         public const uint AttrDirectory = 0x10;
         public const uint AttrNormal = 0x80;
         public const uint AttrReparsePoint = 0x400;
+        public const uint AttrSparse = 0x200;
+        public const uint AttrCompressed = 0x800;
+        public const uint AttrOffline = 0x1000;
+        public const uint AttrRecallOnOpen = 0x40000;
+        public const uint AttrRecallOnDataAccess = 0x400000;
+        /// <summary>Cloud placeholders (OneDrive "online-only" and similar): the data is not on this disk.</summary>
+        public const uint AttrCloudMask = AttrOffline | AttrRecallOnOpen | AttrRecallOnDataAccess;
         public const uint InvalidAttributes = 0xFFFFFFFF;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
+        static extern uint GetCompressedFileSizeW(string path, out uint high);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
+        static extern bool GetDiskFreeSpaceW(string root, out uint sectorsPerCluster, out uint bytesPerSector, out uint freeClusters, out uint totalClusters);
+
+        /// <summary>Allocation unit of the volume that holds path (4 KB when it cannot be read).</summary>
+        public static long ClusterSize(string path)
+        {
+            try
+            {
+                string root = System.IO.Path.GetPathRoot(path);
+                if (string.IsNullOrEmpty(root)) return 4096;
+                if (!root.EndsWith("\\")) root += "\\";
+                uint spc, bps, f, t;
+                if (GetDiskFreeSpaceW(root, out spc, out bps, out f, out t) && spc > 0 && bps > 0) return (long)spc * bps;
+            }
+            catch (Exception) { }
+            return 4096;
+        }
+
+        /// <summary>
+        /// Size on disk of a file. Online-only cloud files take nothing; compressed, sparse and system-compressed
+        /// (reparse point, e.g. Compact OS) files are asked for their real allocation; others are rounded up to clusters.
+        /// </summary>
+        public static long Allocated(long size, uint attr, long cluster, string dir, string name)
+        {
+            if ((attr & AttrCloudMask) != 0) return 0;
+            if (size <= 0) return 0;
+            if ((attr & (AttrCompressed | AttrSparse | AttrReparsePoint)) != 0)
+            {
+                uint high;
+                uint low = GetCompressedFileSizeW(LongPath(Join(dir, name)), out high);
+                if (low != 0xFFFFFFFF || Marshal.GetLastWin32Error() == 0)
+                    size = ((long)high << 32) | low;
+            }
+            return (size + cluster - 1) / cluster * cluster;
+        }
         public static readonly IntPtr InvalidHandle = new IntPtr(-1);
 
         const int FindExInfoBasic = 1;
