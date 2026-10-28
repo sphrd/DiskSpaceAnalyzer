@@ -97,9 +97,10 @@ namespace DiskSpaceAnalyzer
                     SaveShot((i + 1) + "-" + p.Title.Split(' ')[0].ToLowerInvariant());
                 }
                 viewTabs.SelectedIndex = 0;
-                measure.SelectedIndex = 1;
+                measure.SelectedIndex = 0;
                 await Task.Delay(1500);
-                SaveShot((pages.Count + 1) + "-size-on-disk");
+                SaveShot((pages.Count + 1) + "-file-size");
+                measure.SelectedIndex = 1;
                 using (var about = new AboutForm(null))
                 {
                     about.StartPosition = FormStartPosition.Manual;
@@ -132,6 +133,8 @@ namespace DiskSpaceAnalyzer
             try
             {
                 var top = root;
+                for (int i = 0; i < 20 && chart.MorphFrames < 8; i++) await Task.Delay(100);
+                check(chart.Morphs == 1 && chart.MorphFrames >= 8, "chart: the logo turned into the chart after the scan (" + chart.MorphFrames + " frames)");
                 check(top != null && top.Files == 9 && top.Dirs == 8, string.Format("scan: {0} files, {1} folders (expected 9, 8)", top != null ? top.Files : -1, top != null ? top.Dirs : -1));
 
                 // Live updates: a new file and a new folder appear without a rescan.

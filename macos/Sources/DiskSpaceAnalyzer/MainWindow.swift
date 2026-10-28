@@ -281,6 +281,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         btnDelete.tip = "Permanently delete the selected items, bypassing the Trash (⌘⌫)"
         btnExport.tip = "Save the scan as an HTML report or a CSV file"
         measure.tip = "Size: file lengths, as Finder shows them. Size on disk: the space really used (blocks, files not downloaded from iCloud)"
+        measure.selectedIndex = DirNode.onDisk ? 1 : 0
         measure.onChange = { [unowned self] i in self.setMeasure(i == 1) }
         for v: NSView in [pathLabel, pathPanel, btnBrowse, btnScan, btnAccess, btnUp, btnRescan, btnFinder, btnAddList, btnDelete, btnExport, measure,
                           scanBar, split, statusLabel, liveLabel, driveLabel, versionLink] {
@@ -346,6 +347,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             self.activePage.table.setHighlight(i >= 0 && i < self.chart.slices.count ? self.chart.slices[i].rows : [])
         }
         chart.onClick = { [unowned self] s in if let d = s.dir, !self.busy, self.isAttached(d) { self.selectDir(d) } }
+        chart.onCenterClick = { [unowned self] in if self.activePage === self.pContents { self.goUp() } }
 
         split2.isVertical = true
         split2.dividerStyle = .thin

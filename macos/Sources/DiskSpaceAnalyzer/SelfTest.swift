@@ -252,9 +252,9 @@ final class ShotRun {
             steps.wait(2)
             steps.then { self.shot("\(i + 1)-" + (p.title.split(separator: " ").first.map { String($0).lowercased() } ?? "view")) }
         }
-        steps.then { w.viewTabs.selectedIndex = 0; w.measure.selectedIndex = 1 }
+        steps.then { w.viewTabs.selectedIndex = 0; w.measure.selectedIndex = 0 }
         steps.wait(1.5)
-        steps.then { self.shot("\(w.pages.count + 1)-size-on-disk") }
+        steps.then { self.shot("\(w.pages.count + 1)-file-size"); w.measure.selectedIndex = 1 }
         steps.then {
             // Hover the first chart slice to show the linked highlight in the list.
             if !w.chart.slices.isEmpty { w.chart.onHover?(0); w.chart.setHover(0) }

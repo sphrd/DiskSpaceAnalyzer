@@ -111,6 +111,7 @@ namespace DiskSpaceAnalyzer
 
 
             measure = new Segmented("Size", "Size on disk");
+            measure.SelectedIndex = DirNode.OnDisk ? 1 : 0;
             measure.SelectedIndexChanged += (s, e) => SetMeasure(measure.SelectedIndex == 1);
             tips.SetToolTip(measure, "Size: file lengths, as Explorer shows them. Size on disk: the space really used (compression, clusters, online-only cloud files)");
 
@@ -193,6 +194,7 @@ namespace DiskSpaceAnalyzer
             // Pie chart pane (right). It is drawn from sizes already in memory, never from the disk.
             chart = new PieChart { Dock = DockStyle.Fill };
             chart.SliceClicked += sl => { if (sl.Dir != null && !busy) SelectDir(sl.Dir); };
+            chart.CenterClicked += () => { if (ActivePage == pContents) GoUp(); };
             chart.HoverChanged += i => ActivePage.List.SetHighlight(i >= 0 && i < chart.Slices.Count ? chart.Slices[i].Rows : null);
             var chartPanel = new RoundedPanel(12, 8) { Dock = DockStyle.Fill };
             chartPanel.Controls.Add(chart);
@@ -746,6 +748,7 @@ namespace DiskSpaceAnalyzer
                 sub = string.Format("{0} used of {1}  -  {2} free", Fmt.Size(used), Fmt.Size(r.Total), Fmt.Size(r.Free));
             }
             chart.SetData(title, sub, slices, ContentsRings(d));
+            chart.SetCenter(d.Parent == null && r != null ? (r.IsDrive ? r.DisplayName : Native.FileName(r.Path)) : d.Name, d.Parent != null);
         }
 
         /// <summary>Outer rings around the folder contents chart: subfolders and their subfolders.</summary>

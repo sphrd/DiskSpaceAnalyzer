@@ -40,6 +40,11 @@ final class PieChart: NSView {
     private var animStart = Date()
     private var animTimer: Timer?
     private let animSeconds = 0.65
+    private var lastTick = Date()
+    // Centre when nothing is hovered: the folder shown; clicking it goes up one level (the reverse of clicking a slice).
+    private var centerName: String?
+    private var canGoUp = false, hoverCenter = false
+    var onCenterClick: (() -> Void)?
     private let startAngle: CGFloat = -90
 
     var onHover: ((Int) -> Void)?
@@ -69,6 +74,7 @@ final class PieChart: NSView {
         self.rings = rings
         arcs = []
         hoverArc = -1
+        centerName = nil; canGoUp = false; hoverCenter = false
         if rings > 0 && total > 0 {
             var a = startAngle
             for (i, s) in slices.enumerated() {
@@ -81,10 +87,14 @@ final class PieChart: NSView {
         if logoMode && total > 0 && window != nil {
             anim = 0
             animStart = Date()
+            lastTick = Date()
             animTimer?.invalidate()
             animTimer = Timer.scheduledTimer(withTimeInterval: 0.015, repeats: true) { [weak self] t in
                 guard let s = self else { t.invalidate(); return }
-                s.anim = CGFloat(min(1, Date().timeIntervalSince(s.animStart) / s.animSeconds))
+                // Advance by frame, at most 50 ms per step: a busy moment right after a scan must not skip the morph.
+                let now = Date(), dt = min(0.05, now.timeIntervalSince(s.lastTick))
+                s.lastTick = now
+                s.anim = CGFloat(min(1, Double(s.anim) + dt / s.animSeconds))
                 if s.anim >= 1 { t.invalidate(); s.animTimer = nil }
                 s.needsDisplay = true
             }
@@ -241,12 +251,25 @@ final class PieChart: NSView {
             l1 = a.dir.name; l2 = Fmt.size(a.dir.size)
             l3 = String(format: "%.1f %%", 100 * Double(a.dir.size) / Double(max(1, a.parentSize))) + " of " + (a.dir.parent?.name ?? "parent")
         } else if hover >= 0 && hover < slices.count { l1 = slices[hover].label; l2 = Fmt.size(slices[hover].size); l3 = slices[hover].detail }
+        else if let c = centerName { l1 = c; l3 = canGoUp && hoverCenter ? "Click to go up" : "" }
+        let up = hoverCenter && hover < 0 && hoverArc < 0
         let inner = hr.insetBy(dx: 16, dy: 0)
         let h1: CGFloat = 15, h2: CGFloat = 19, h3: CGFloat = l3.isEmpty ? 0 : 15
         let ty = hr.minY + (hr.height - h1 - h2 - h3) / 2
-        Theme.drawText(l1, in: NSRect(x: inner.minX, y: ty, width: inner.width, height: h1), font: Theme.font9, color: T.MUTED, align: .center)
-        Theme.drawText(l2, in: NSRect(x: inner.minX, y: ty + h1, width: inner.width, height: h2), font: Theme.font11, color: T.FG, align: .center)
+        Theme.drawText(l1, in: NSRect(x: inner.minX, y: ty, width: inner.width, height: h1), font: Theme.font9, color: up ? T.ACCENT : T.MUTED, align: .center)
+        Theme.drawText(l2, in: NSRect(x: inner.minX, y: ty + h1, width: inner.width, height: h2), font: Theme.font11, color: up ? T.ACCENT : T.FG, align: .center)
         if h3 > 0 { Theme.drawText(l3, in: NSRect(x: inner.minX, y: ty + h1 + h2, width: inner.width, height: h3), font: Theme.font9, color: T.MUTED, align: .center) }
+    }
+
+    /// Names the folder in the centre (instead of "Total"); with canGoUp the centre is clickable. Call after setData.
+    func setCenter(_ name: String, canGoUp: Bool) {
+        centerName = name; self.canGoUp = canGoUp
+        needsDisplay = true
+    }
+
+    private func inCenter(_ p: NSPoint) -> Bool {
+        if total <= 0 || pieRect.width <= 0 || logoMode || animating { return false }
+        return angleAt(p).dist < Double(pieRect.width / 2 * holeRatio)
     }
 
     private func angleAt(_ p: NSPoint) -> (dist: Double, angle: Double) {
@@ -290,19 +313,21 @@ final class PieChart: NSView {
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         let h = sliceAt(p), ha = arcAt(p)
-        if ha >= 0 || (h >= 0 && slices[h].dir != nil) { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
-        if h != hover || ha != hoverArc { hover = h; hoverArc = ha; needsDisplay = true }
+        let hc = canGoUp && inCenter(p)
+        if hc || ha >= 0 || (h >= 0 && slices[h].dir != nil) { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+        if h != hover || ha != hoverArc || hc != hoverCenter { hover = h; hoverArc = ha; hoverCenter = hc; needsDisplay = true }
         if h != reported { reported = h; onHover?(h) }
     }
 
     override func mouseExited(with event: NSEvent) {
         NSCursor.arrow.set()
-        if hover != -1 || hoverArc != -1 { hover = -1; hoverArc = -1; needsDisplay = true }
+        if hover != -1 || hoverArc != -1 || hoverCenter { hover = -1; hoverArc = -1; hoverCenter = false; needsDisplay = true }
         if reported != -1 { reported = -1; onHover?(-1) }
     }
 
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
+        if canGoUp && inCenter(p) { onCenterClick?(); return }
         let ha = arcAt(p)
         if ha >= 0 {
             let s = ChartSlice(arcs[ha].dir.name, arcs[ha].dir.size, arcs[ha].color)

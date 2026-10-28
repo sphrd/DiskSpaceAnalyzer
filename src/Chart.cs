@@ -50,6 +50,13 @@ namespace DiskSpaceAnalyzer
 
         // Logo state (drive not scanned yet / scan running) and the logo -> chart morph.
         bool logoMode;
+        /// <summary>How often the logo has turned into a chart (checked by the self-test).</summary>
+        public int Morphs, MorphFrames;
+        double lastTickMs;
+        // Centre when nothing is hovered: the folder shown, and whether clicking it goes up one level.
+        string centerName;
+        bool canGoUp, hoverCenter;
+        public event Action CenterClicked;
         string logoNote = "";
         readonly Timer animTimer = new Timer { Interval = 15 };
         readonly System.Diagnostics.Stopwatch animClock = new System.Diagnostics.Stopwatch();
@@ -68,7 +75,10 @@ namespace DiskSpaceAnalyzer
             Font = Theme.FONT;
             animTimer.Tick += (s, e) =>
             {
-                anim = (float)Math.Min(1.0, animClock.Elapsed.TotalMilliseconds / AnimMs);
+                // Advance by frame, at most 50 ms per step: a busy moment right after a scan must not skip the morph.
+                double now = animClock.Elapsed.TotalMilliseconds, dt = Math.Min(50, now - lastTickMs);
+                lastTickMs = now;
+                anim = (float)Math.Min(1.0, anim + dt / AnimMs);
                 if (anim >= 1) { animTimer.Stop(); animClock.Reset(); }
                 Invalidate();
             };
@@ -110,6 +120,8 @@ namespace DiskSpaceAnalyzer
             foreach (var s in this.slices) total += Math.Max(0, s.Size);
             this.rings = rings;
             hoverArc = -1;
+            centerName = null;
+            canGoUp = hoverCenter = false;
             arcs = new List<ChartArc>();
             if (rings > 0 && total > 0)
             {
@@ -128,7 +140,9 @@ namespace DiskSpaceAnalyzer
             // Coming from the logo: morph it into the chart instead of switching at once.
             if (logoMode && total > 0 && Visible && IsHandleCreated)
             {
+                Morphs++;
                 anim = 0;
+                lastTickMs = 0;
                 animClock.Restart();
                 animTimer.Start();
             }
@@ -162,6 +176,24 @@ namespace DiskSpaceAnalyzer
         float InnerOuterRatio { get { return rings > 0 ? 1f - 0.15f * rings : 1f; } }
         float RingInner(int level) { return InnerOuterRatio + 0.02f + 0.15f * (level - 1); }
         float RingOuter(int level) { return InnerOuterRatio + 0.15f * level; }
+
+        /// <summary>
+        /// Names the folder shown in the centre (instead of "Total") when nothing is hovered; with canGoUp the centre is
+        /// clickable and raises CenterClicked (to go up one folder, the reverse of clicking a slice). Call after SetData.
+        /// </summary>
+        public void SetCenter(string name, bool canGoUp)
+        {
+            centerName = name;
+            this.canGoUp = canGoUp;
+            Invalidate();
+        }
+
+        bool InCenter(Point p)
+        {
+            if (total <= 0 || pieRect.Width <= 0 || logoMode || Animating) return false;
+            double dx = p.X - (pieRect.X + pieRect.Width / 2.0), dy = p.Y - (pieRect.Y + pieRect.Height / 2.0);
+            return Math.Sqrt(dx * dx + dy * dy) < pieRect.Width / 2.0 * HoleRatio;
+        }
 
         /// <summary>Highlights a slice from outside (the list) without raising HoverChanged.</summary>
         public void SetHover(int index)
@@ -224,6 +256,7 @@ namespace DiskSpaceAnalyzer
         {
             float e = Ease(anim);
             var r = pieRect;
+            MorphFrames++;
             DrawLogo(g, r, 1 - e);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             // With outer rings the slices only reach the inner ring's edge; the rings fade in around them.
@@ -326,13 +359,15 @@ namespace DiskSpaceAnalyzer
                 l3 = string.Format("{0:0.0} % of {1}", 100.0 * a.Dir.Size / Math.Max(1, a.ParentSize), a.Dir.Parent != null ? a.Dir.Parent.Name : "parent");
             }
             else if (hover >= 0 && hover < slices.Count) { l1 = slices[hover].Label; l2 = Fmt.Size(slices[hover].Size); l3 = slices[hover].Detail ?? ""; }
+            else if (centerName != null) { l1 = centerName; l2 = Fmt.Size(total); l3 = canGoUp ? (hoverCenter ? "Click to go up" : "") : ""; }
             else { l1 = "Total"; l2 = Fmt.Size(total); l3 = ""; }
             var inner = Rectangle.Inflate(hr, -Theme.S(14), 0);
             int h1 = Theme.FONT_9.Height, h2 = Theme.FONT_11.Height, h3 = l3.Length > 0 ? Theme.FONT_9.Height : 0;
             int ty = hr.Y + (hr.Height - h1 - h2 - h3) / 2;
             const TextFormatFlags c1 = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.HorizontalCenter;
-            TextRenderer.DrawText(g, l1, Theme.FONT_9, new Rectangle(inner.X, ty, inner.Width, h1), Theme.MUTED, c1);
-            TextRenderer.DrawText(g, l2, Theme.FONT_11, new Rectangle(inner.X, ty + h1, inner.Width, h2), Theme.FG, c1);
+            bool up = hoverCenter && hover < 0 && hoverArc < 0;
+            TextRenderer.DrawText(g, l1, Theme.FONT_9, new Rectangle(inner.X, ty, inner.Width, h1), up ? Theme.ACCENT : Theme.MUTED, c1);
+            TextRenderer.DrawText(g, l2, Theme.FONT_11, new Rectangle(inner.X, ty + h1, inner.Width, h2), up ? Theme.ACCENT : Theme.FG, c1);
             if (h3 > 0) TextRenderer.DrawText(g, l3, Theme.FONT_9, new Rectangle(inner.X, ty + h1 + h2, inner.Width, h3), Theme.MUTED, c1);
         }
 
@@ -417,8 +452,9 @@ namespace DiskSpaceAnalyzer
             base.OnMouseMove(e);
             int h = HitTest(e.Location);
             int ha = HitArc(e.Location);
-            Cursor = ha >= 0 || (h >= 0 && slices[h].Dir != null) ? Cursors.Hand : Cursors.Default;
-            if (h != hover || ha != hoverArc) { hover = h; hoverArc = ha; Invalidate(); }
+            bool hc = canGoUp && InCenter(e.Location);
+            Cursor = hc || ha >= 0 || (h >= 0 && slices[h].Dir != null) ? Cursors.Hand : Cursors.Default;
+            if (h != hover || ha != hoverArc || hc != hoverCenter) { hover = h; hoverArc = ha; hoverCenter = hc; Invalidate(); }
             if (h != reported)
             {
                 reported = h;
@@ -429,7 +465,7 @@ namespace DiskSpaceAnalyzer
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            if (hover != -1 || hoverArc != -1) { hover = -1; hoverArc = -1; Invalidate(); }
+            if (hover != -1 || hoverArc != -1 || hoverCenter) { hover = -1; hoverArc = -1; hoverCenter = false; Invalidate(); }
             if (reported != -1)
             {
                 reported = -1;
@@ -441,6 +477,7 @@ namespace DiskSpaceAnalyzer
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
+            if (canGoUp && InCenter(e.Location)) { if (CenterClicked != null) CenterClicked(); return; }
             int ha = HitArc(e.Location);
             if (ha >= 0) { if (SliceClicked != null) SliceClicked(new ChartSlice { Dir = arcs[ha].Dir, Label = arcs[ha].Dir.Name }); return; }
             int h = HitTest(e.Location);

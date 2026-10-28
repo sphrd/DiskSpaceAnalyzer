@@ -20,7 +20,7 @@ namespace DiskSpaceAnalyzer
     internal sealed class DirNode
     {
         /// <summary>Which number every view uses: false = file size, true = size on disk.</summary>
-        public static bool OnDisk;
+        public static bool OnDisk = true;
 
         public string Name;
         public DirNode Parent;

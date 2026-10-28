@@ -279,6 +279,12 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - **Deletion** goes through `DeleteTarget` (file, folder, folder contents only, Recycle Bin) and `ConfirmAndDelete`;
   afterwards `ApplyDeleted` drops removed nodes and rescans folders that still exist. Contents-only targets skip files in
   use quietly (counted). Recycle uses `SHFileOperation` with ALLOWUNDO + WANTNUKEWARNING.
+- **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
+  folder (the reverse of clicking a slice). **Size on disk** is the default measure.
+- **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI
+  thread is busy (tree rebuild, history save, garbage collection of the index), so the 650 ms passed before the first
+  frame and the chart just appeared. The morph now advances per timer tick by at most 50 ms (Windows and macOS), and the
+  self-test checks that it drew at least 8 frames.
 - **History:** `%LOCALAPPDATA%\DiskSpaceAnalyzer\history\<root>.dsa` (gzip: folder names and sizes, no file names).
   One file per drive/folder, overwritten by each full scan; only the 10 most recently written files are kept.
 - **Gotcha (v1.7.0 crash):** `Path.GetDirectoryName`/`GetFileName` throw `PathTooLongException` beyond 260 characters
@@ -315,4 +321,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
   live updates, self-test and screenshot modes. macOS has the same views (no master file table; Trash instead of the
   Recycle Bin; FSEvents; iCloud dataless files count 0 on disk; shortcuts ⇧⌘D add to delete list, ⌘F search, ⇧⌘E export).
 - v1.7.1 (2026-10-28): fix a crash in live updates on paths longer than 260 characters; About shows the speed tip and
-  the keyboard shortcuts; scan history keeps only the last scan of the 10 most recent drives/folders.
+  the keyboard shortcuts; scan history keeps only the last scan of the 10 most recent drives/folders; the chart centre
+  names the folder and goes up on click; size on disk is the default; the logo morph is visible again after big scans.

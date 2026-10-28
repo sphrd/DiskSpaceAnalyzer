@@ -34,8 +34,8 @@ single-file GUI.
   in or out.
 - **Live updates:** scanned drives and folders are watched; files that appear,
   change or go away update the results within seconds, without a rescan.
-- **Size or size on disk:** one switch changes every view between file size (as
-  Explorer's Size column) and the space really used: compressed, sparse and
+- **Size on disk or file size:** one switch changes every view between the space
+  really used (the default) and file size (as Explorer's Size column): compressed, sparse and
   Compact OS files count what they take, small files a whole cluster,
   OneDrive "online-only" files nothing, and hard links only once (with the
   master file table).
@@ -46,7 +46,7 @@ open list, slice for row, and hovering one highlights the other)
 - **Contents:** the selected folder's subfolders and files with size, share,
   change since the last scan, counts and dates. The ring chart shows the
   folder's contents and, in two outer rings, their subfolders; click any part
-  to open it. For a drive it also shows system/unreadable space and free space.
+  to open it, and click the centre (the folder's name) to go back up. For a drive it also shows system/unreadable space and free space.
 - **Files:** the largest files under the selected folder, with a name search
   (`*.iso`, `invoice`; <kbd>Ctrl</kbd>+<kbd>F</kbd>) and filters by type, size and age
   ("older than 1 year"). Searches the in-memory index, so it is instant.

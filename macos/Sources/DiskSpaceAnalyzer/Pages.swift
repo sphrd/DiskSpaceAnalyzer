@@ -163,6 +163,8 @@ extension MainWindowController {
             }
         }
         chart.setData(title, sub, slices, rings: 2)
+        let centre = d.parent == nil ? (r.map { $0.isDrive ? $0.displayName : (($0.path as NSString).lastPathComponent) } ?? d.name) : d.name
+        chart.setCenter(centre, canGoUp: d.parent != nil)
     }
 
     /// Nothing scanned yet: the chart pane shows the app logo; it morphs into the chart once the scan is done.

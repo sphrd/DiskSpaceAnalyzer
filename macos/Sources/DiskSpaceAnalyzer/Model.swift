@@ -17,7 +17,7 @@ struct FileRec {
 /// A scanned folder with its totals and the index of its own files.
 final class DirNode {
     /// Which number every view uses: false = file size, true = size on disk.
-    static var onDisk = false
+    static var onDisk = true
 
     var name: String
     weak var parent: DirNode?
