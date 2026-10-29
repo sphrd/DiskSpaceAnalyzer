@@ -12,8 +12,9 @@ Open source, a single small app, nothing to install.</p>
 ![Disk Space Analyzer: drive tree, folder contents and ring chart (demo data)](assets/screenshot.png)
 
 It starts analyzing your system drive the moment it opens. See where your space
-went, find big, old and duplicate files, follow cleanup suggestions, and delete
-what you don't need, to the Recycle Bin / Trash or permanently.
+went, find big, old and duplicate files, follow cleanup suggestions, uninstall
+apps together with everything they left behind, and delete what you don't need,
+to the Recycle Bin / Trash or permanently.
 
 ## Features
 
@@ -40,12 +41,9 @@ open list, and hovering a slice highlights its row and the other way round)
   change since the last scan, counts and dates. The ring chart shows the folder
   and, in two outer rings, its subfolders. Click a part to open it; click the
   centre (the folder's name) to go back up. For a drive it also shows free space.
-- **Files:** the largest files, with a name search (`*.iso`, `invoice`) and
-  filters by type, size and age ("older than 1 year"). Instant, from memory.
-- **File types:** space by extension or by category (videos, images, archives,
-  disk images, installers...).
-- **Duplicates:** files with identical content; **Select extra copies** keeps
-  the newest of each group.
+- **The chart, in every tab:** the 10 largest items always get a slice of their
+  own (all items when there are fewer), and so does every item of at least 2 % of
+  the total (7.2° of the circle); only the rest is grouped as "N smaller items".
 - **Suggestions** (the green tab next to Contents): how much can be freed, in
   large print, and what: the Recycle Bin / Trash, temporary files, caches
   (browsers, developer tools, Xcode, Homebrew...), `node_modules` folders, old
@@ -54,16 +52,23 @@ open list, and hovering a slice highlights its row and the other way round)
   **Deselect all**) and **Delete permanently** right there. Safe items start
   checked; items to review first start unchecked.
   Suggestions are looked up again whenever the disk changes or you rescan.
-- Hover any row or folder to see its full name and path.
-- **Apps:** every installed app, with its own logo and its real size on disk (Windows: programs and
-  Microsoft Store apps; macOS: apps in Applications). Expand an app to see
-  everything that belongs to it: its program folder, settings and caches
-  (AppData / ~/Library), shared data, shortcuts and, on Windows, registry keys.
+- **Apps:** every installed app, with its own logo and its real size on disk
+  (Windows: programs and Microsoft Store apps; macOS: apps in Applications).
+  Expand an app (its arrow, or a double-click) to see everything that belongs to
+  it, right under it: its program folder, settings and caches (AppData /
+  ~/Library), shared data, shortcuts and, on Windows, registry keys.
   **Uninstall...** on Windows runs the app's own uninstaller, checks everything
   again and asks to delete whatever is left (registry keys are saved to a `.reg`
   backup first). On macOS one confirmation moves the app and all its files to
   the Trash.
+- **Files:** the largest files, with a name search (`*.iso`, `invoice`) and
+  filters by type, size and age ("older than 1 year"). Instant, from memory.
+- **File types:** space by extension or by category (videos, images, archives,
+  disk images, installers...).
+- **Duplicates:** files with identical content; **Select extra copies** keeps
+  the newest of each group.
 - **Changes:** which folders grew or shrank since the previous scan.
+- Hover any row or folder to see its full name and path.
 
 ![Duplicates: groups of identical files and the space their extra copies take (demo data)](assets/screenshot-duplicates.png)
 
@@ -134,7 +139,7 @@ or later.
 | Rescan the selected folder (circular arrow button) | <kbd>F5</kbd> | <kbd>⌘</kbd><kbd>R</kbd> |
 | Add to the delete list | <kbd>Ctrl</kbd>+<kbd>D</kbd> | <kbd>⌘</kbd><kbd>D</kbd> |
 | Delete permanently | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> (or <kbd>Del</kbd>) | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> (or <kbd>⌘</kbd><kbd>⌫</kbd>) |
-| Check / uncheck in Suggestions | <kbd>Space</kbd> | <kbd>Space</kbd> |
+| Check / uncheck in Suggestions and Apps leftovers | <kbd>Space</kbd> | <kbd>Space</kbd> |
 | Search files | <kbd>Ctrl</kbd>+<kbd>F</kbd> | <kbd>⌘</kbd><kbd>F</kbd> |
 | Copy path | <kbd>Ctrl</kbd>+<kbd>C</kbd> | right-click menu |
 | Export | | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>E</kbd> |

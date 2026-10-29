@@ -282,7 +282,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Since v1.7 this is built in: `.\tools\make_demo.ps1 C:\Demo` (sparse files, ~250 MB on disk, a few duplicate pairs),
   `DiskSpaceAnalyzer.exe --cli screenshot <out> C:\Demo --demo` (finds duplicates first, then shows the folder as
   `E:\ Data` with made-up `F:\`/`G:\` drives; skips Suggestions and Changes, which would show this PC), copy
-  `1-contents.png` to `assets\screenshot.png` and `5-duplicates.png` to `assets\screenshot-duplicates.png`, then
+  `1-contents.png` to `assets\screenshot.png` and `6-duplicates.png` to `assets\screenshot-duplicates.png`, then
   `.\tools\make_demo.ps1 C:\Demo -Remove` and delete `%LOCALAPPDATA%\DiskSpaceAnalyzer\history`.
 - Repo logo: `assets/app.png` at the top of the README; `assets/social-preview.png` is the GitHub social preview
   (Settings > General > Social preview; GitHub has no API for it, so it is uploaded by hand).
@@ -430,3 +430,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
   hover box with full name and path for every row and folder; circular-arrow Rescan; Ctrl/Cmd+D add to delete list,
   Ctrl/Cmd+Shift+D delete permanently; delete list keeps the real remaining size after a partial delete; suggestions refresh
   after any change; live updates never drop outside changes; permission buttons hide when granted; chart pane 4/5.
+- v1.8.0 (2026-10-29): Apps tab (uninstaller): every installed app with its own logo and real size; expand an app to see all
+  its files, settings and (Windows) registry keys in place; Windows runs the official uninstaller, checks again and asks to delete
+  what is left (registry backed up to .reg); macOS moves the app and all its files to the Trash in one step. Chart: the 10
+  largest items always get their own slice, plus every item of at least 2 % (7.2 degrees), at most 50.
