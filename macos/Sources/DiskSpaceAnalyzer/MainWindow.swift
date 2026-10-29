@@ -257,7 +257,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var appRoots: [String]?               // where to look for apps (nil = /Applications, its Utilities, ~/Applications)
     var appsGen = 0
     var appsLoading = false
-    var appsWorking = false               // looking for leftovers, or waiting for a vendor uninstaller
+    var appsWorking = false               // looking for an app's files before uninstalling it
     var autoAccept = false                // screenshot run: no confirmations
     // Delete list
     var basket: [DeleteTarget] = []
@@ -1085,7 +1085,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             let app = selectedApp
             let idle = !busy && !scanning && !appsWorking
             add("Uninstall...", "", [], idle && app != nil && !app!.uninstalled, #selector(menuUninstall), warn: true)
-            add("Look for leftovers", "", [], idle && app != nil, #selector(menuLeftovers))
             m.addItem(.separator())
         }
         add("Open", "", [], any && sel.count == 1, #selector(menuOpen))
@@ -1099,7 +1098,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     }
 
     @objc private func menuUninstall() { uninstallSelectedApp() }
-    @objc private func menuLeftovers() { lookForLeftoversOfSelected() }
     @objc private func menuOpen() { openSelected() }
     @objc private func menuFinder() { showInFinder() }
     @objc private func menuCopy() { copyPath() }

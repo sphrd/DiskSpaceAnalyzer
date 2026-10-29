@@ -195,8 +195,8 @@ extension MainWindowController {
         if info.isGroup || info.isSummary { return }
         // A suggestion opens and closes; its items show in Finder.
         if p === pSuggest && info.suggestion != nil && info.groupOf == nil && info.path == nil { expandSuggestions([info], nil); return }
-        // An app with leftovers opens and closes; an uninstalled app has nothing to show in Finder.
-        if p === pApps, let a = info.app, info.groupOf == nil, a.hasLeftovers || a.uninstalled { expandApps([info], nil); return }
+        // An app opens and closes (showing all its files).
+        if p === pApps, info.app != nil, info.groupOf == nil { expandApps([info], nil); return }
         openSelected()
     }
 

@@ -17,8 +17,10 @@ final class InstalledApp {
     var size: Int64 = 0
     var installed: Date?
     var uninstalled = false
-    var leftovers: [AppLeftover]?        // nil = not looked for yet
-    var expanded = true
+    var leftovers: [AppLeftover]?        // installed: the bundle and all its files; partly removed: what is left; nil = not looked for yet
+    var expanded = false
+    var loadingItems = false
+    var itemWaiters: [() -> Void] = []
 
     var publisher: String {
         let parts = bundleId.split(separator: ".")
@@ -28,7 +30,7 @@ final class InstalledApp {
 
     var leftoverSize: Int64 { (leftovers ?? []).reduce(Int64(0)) { $0 + max(0, $1.size) } }
     var shownSize: Int64 { uninstalled ? leftoverSize : size }
-    var displayName: String { uninstalled ? name + "  (uninstalled — leftovers)" : name }
+    var displayName: String { uninstalled ? name + "  (partly removed)" : name }
     var hasLeftovers: Bool { !(leftovers ?? []).isEmpty }
     var checkedLeftovers: [AppLeftover] { (leftovers ?? []).filter { $0.checked } }
 
@@ -81,19 +83,6 @@ final class InstalledApp {
             }
         }
         return out.sorted { $0.size != $1.size ? $0.size > $1.size : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    /// A vendor uninstaller: an app with "Uninstall" in its name inside the bundle's Contents/Resources, or next to the
-    /// app in its own folder (not loose in /Applications itself).
-    static func vendorUninstaller(_ app: InstalledApp, roots: [String]) -> String? {
-        func isUninstaller(_ p: String) -> Bool {
-            let n = PathUtil.name(p).lowercased()
-            return n.hasSuffix(".app") && n.contains("uninstall") && !PathUtil.same(p, app.path)
-        }
-        if let p = DeleteJob.children(app.path + "/Contents/Resources").first(where: isUninstaller) { return p }
-        let parent = PathUtil.parent(app.path)
-        if roots.contains(where: { PathUtil.same($0, parent) }) || InstalledApp.defaultRoots.contains(where: { PathUtil.same($0, parent) }) { return nil }
-        return DeleteJob.children(parent).first(where: isUninstaller)
     }
 
     /// Items named after the bundle id B or the app name N in ~/Library and /Library (case-insensitive; names shorter
@@ -177,8 +166,8 @@ extension MainWindowController {
         btnAppsRefresh.tip = "List the installed apps again"
         appSearch.toolTip = "Part of an app's name, publisher or bundle id"
         appSearch.onChange = { [unowned self] in self.showApps() }
-        btnUninstall.tip = "Move the selected app to the Trash, then choose which of its leftovers to remove"
-        btnRemoveLeftovers.tip = "Move the checked leftovers to the Trash"
+        btnUninstall.tip = "Move the selected app and all its files to the Trash"
+        btnRemoveLeftovers.tip = "Move the checked items that are left to the Trash"
         for b in [btnAppsRefresh, btnUninstall, btnRemoveLeftovers] { b.compact = true }
         let bar = ActionBar([btnAppsRefresh, appSearch, btnUninstall, btnRemoveLeftovers], right: [btnUninstall, btnRemoveLeftovers])
         bar.minRowHeight = 0
@@ -189,8 +178,8 @@ extension MainWindowController {
         p.chartTitle = "Installed apps"
         p.chartScope = "of apps"
         p.empty = "No apps found."
-        // Apps with leftovers (uninstalled, or after Look for leftovers) come first, then the rest in the sort order.
-        p.pinFirst = { $0.app?.hasLeftovers ?? false }
+        // Partly removed apps (items left that could not be moved) come first, then the rest in the sort order.
+        p.pinFirst = { $0.app?.uninstalled ?? false }
         p.fill = { [unowned self] in if self.apps == nil { self.loadApps() } else { self.showApps() } }
         p.table.onClickAt = { [unowned self] r, pt in self.appClick(r, pt) }
         return p
@@ -224,10 +213,14 @@ extension MainWindowController {
         }, { [weak self] found in
             guard let self = self, gen == self.appsGen else { return }
             self.appsLoading = false
-            // Uninstalled apps with leftovers stay; leftovers found earlier stay with their app.
+            // Partly removed apps stay; an app's items found earlier stay with it (open or closed).
             let old = self.apps ?? []
             for a in found {
-                if let o = old.first(where: { PathUtil.same($0.path, a.path) && !$0.uninstalled }) { a.leftovers = o.leftovers; a.expanded = o.expanded }
+                if let o = old.first(where: { PathUtil.same($0.path, a.path) && !$0.uninstalled }) {
+                    a.expanded = o.expanded
+                    if let items = o.leftovers, let b = items.first, b.kind == "App" { b.size = a.size; a.leftovers = items }
+                    else if o.expanded { a.expanded = false }
+                }
             }
             let kept = old.filter { o in o.uninstalled && o.hasLeftovers && !found.contains(where: { PathUtil.same($0.path, o.path) }) }
             self.apps = kept + found
@@ -265,15 +258,26 @@ extension MainWindowController {
             it.percent = total > 0 ? 100 * Double(max(0, it.size)) / Double(total) : 0
             it.hideBar = a.uninstalled
             it.cells = [it.name, Fmt.size(it.size), a.uninstalled ? "" : Fmt.pct(it.percent), it.category, it.note, Fmt.date(it.modified), it.folder]
-            it.tip = a.name + "\n" + a.path + (a.bundleId.isEmpty ? "" : "\n" + a.bundleId)
+            var tip = a.name + "\n" + a.path + (a.bundleId.isEmpty ? "" : "\n" + a.bundleId)
+            if !a.uninstalled, a.leftovers != nil { tip += "\nAll its files: " + Fmt.size(a.leftoverSize) }
+            it.tip = tip
             if a.uninstalled { it.color = T.WARN_FG }
-            if a.hasLeftovers {
-                it.chevron = a.expanded ? 1 : 0
-                it.check = a.checkState
-            }
+            it.chevron = a.expanded ? 1 : 0
+            if a.uninstalled && a.hasLeftovers { it.check = a.checkState }
             rows.append(it)
-            if !a.hasLeftovers || !a.expanded { continue }
-            for l in a.leftovers ?? [] {
+            if !a.expanded { continue }
+            guard let items = a.leftovers else {
+                let w = ItemInfo()
+                w.app = a
+                w.groupOf = it
+                w.isSummary = true
+                w.hideBar = true
+                w.name = "Looking for its files..."
+                w.cells = [w.name, "", "", "", "", "", ""]
+                rows.append(w)
+                continue
+            }
+            for l in items {
                 let c = ItemInfo()
                 c.app = a
                 c.leftover = l
@@ -284,11 +288,10 @@ extension MainWindowController {
                 c.path = l.path
                 c.category = l.note
                 c.folder = l.path
-                c.percent = total > 0 ? 100 * Double(c.size) / Double(total) : 0
                 c.hideBar = true
                 c.cells = [c.name, l.size < 0 ? "—" : Fmt.size(l.size), "", l.note, "", "", l.path]
                 c.tip = c.name + "\n" + l.path + (l.note.isEmpty ? "" : "\n" + l.note)
-                c.check = l.checked ? 1 : 0
+                c.check = a.uninstalled ? (l.checked ? 1 : 0) : -1
                 rows.append(c)
             }
         }
@@ -303,7 +306,7 @@ extension MainWindowController {
         let size = installed.reduce(Int64(0)) { $0 + $1.size }
         let n = installed.count
         if all.isEmpty && appsLoading { p.setCaption("Looking for installed apps...") }
-        else { p.setCaption("\(Fmt.count(n)) app\(n == 1 ? "" : "s"), \(Fmt.size(size)).  Select an app and press Uninstall: it is moved to the Trash, then you choose which leftovers to remove.") }
+        else { p.setCaption("\(Fmt.count(n)) app\(n == 1 ? "" : "s"), \(Fmt.size(size)).  Expand an app to see all its files. Uninstall moves the app and all its files to the Trash.") }
         p.chartSub = Fmt.size(total)
         p.chartTotal = 0
         p.empty = filtered ? "No apps match." : "No apps found."
@@ -314,10 +317,11 @@ extension MainWindowController {
     private func appKey(_ it: ItemInfo) -> String? {
         guard let a = it.app else { return nil }
         if let l = it.leftover { return "l\n" + l.path }
+        if it.groupOf != nil { return nil }
         return "a\n" + a.path + (a.uninstalled ? "\nu" : "")
     }
 
-    /// The one installed app selected (a head row), if exactly one row is selected.
+    /// The one app selected (a head row), if exactly one row is selected.
     var selectedApp: InstalledApp? {
         guard pApps != nil else { return nil }
         let sel = pApps.selectedItems
@@ -325,19 +329,27 @@ extension MainWindowController {
         return a
     }
 
+    func selectApp(_ a: InstalledApp) {
+        guard let i = pApps.items.firstIndex(where: { $0.app === a && $0.groupOf == nil }) else { return }
+        pApps.select(IndexSet(integer: i))
+        let last = pApps.items.lastIndex { $0.app === a } ?? i
+        pApps.table.scrollRowToVisible(last)
+        pApps.table.scrollRowToVisible(i)
+    }
+
     func updateAppButtons() {
         let idle = !busy && !scanning && !appsWorking
         btnAppsRefresh.isEnabled = idle && !appsLoading
         btnUninstall.isEnabled = idle && (selectedApp.map { !$0.uninstalled } ?? false)
-        btnRemoveLeftovers.isEnabled = idle && (apps ?? []).contains { !$0.checkedLeftovers.isEmpty }
+        btnRemoveLeftovers.isEnabled = idle && (apps ?? []).contains { $0.uninstalled && !$0.checkedLeftovers.isEmpty }
     }
 
     // MARK: checks and expanding (as in Suggestions)
 
     func appChecksChanged() {
-        for it in pApps.items {
+        for it in pApps.items where it.check >= 0 {
             if let l = it.leftover { it.check = l.checked ? 1 : 0 }
-            else if let a = it.app, a.hasLeftovers { it.check = a.checkState }
+            else if let a = it.app { it.check = a.checkState }
         }
         pApps.table.redrawCells()
         updateButtons()
@@ -353,14 +365,38 @@ extension MainWindowController {
         appChecksChanged()
     }
 
+    /// Opens or closes apps (nil = toggle); the first time an app opens its files are looked for in the background.
     func expandApps(_ rows: [ItemInfo], _ open: Bool?) {
         var changed = false
-        for it in rows {
-            guard let a = it.app, a.hasLeftovers else { continue }
+        for it in rows where it.groupOf == nil {
+            guard let a = it.app else { continue }
             let to = open ?? !a.expanded
             if a.expanded != to { a.expanded = to; changed = true }
+            if to && a.leftovers == nil { loadAppItems(a) }
         }
         if changed { showApps() }
+    }
+
+    /// Everything that belongs to an app: the bundle first, then what the leftover search finds.
+    func loadAppItems(_ a: InstalledApp, _ done: (() -> Void)? = nil) {
+        if a.loadingItems { if let d = done { a.itemWaiters.append(d) }; return }
+        a.loadingItems = true
+        let id = a.bundleId, name = a.name, path = a.path, size = a.size
+        DispatchQueue.global(qos: .userInitiated).async {
+            let bundle = AppLeftover(path, "App")
+            bundle.isDir = true
+            bundle.size = size
+            let items = (PathUtil.exists(path) ? [bundle] : []) + InstalledApp.findLeftovers(bundleId: id, name: name)
+            DispatchQueue.main.async {
+                a.loadingItems = false
+                if !a.uninstalled { a.leftovers = items }
+                self.showApps()
+                let waiters = a.itemWaiters
+                a.itemWaiters = []
+                done?()
+                for w in waiters { w() }
+            }
+        }
     }
 
     func appClick(_ row: Int, _ pt: NSPoint) -> Bool {
@@ -389,8 +425,8 @@ extension MainWindowController {
 
     // MARK: uninstall
 
-    /// Uninstall... : asks, quits the app when it runs, offers its own uninstaller, moves it to the Trash, then lists
-    /// its leftovers under it. done(true) when the app was removed.
+    /// Uninstall... : one confirmation, then the app (quit first when it runs) and all its files go to the Trash
+    /// together. What could not be moved stays under "<App>  (partly removed)". done(true) when everything went.
     func uninstallSelectedApp(_ done: ((Bool) -> Void)? = nil) {
         guard let a = selectedApp, !a.uninstalled, !busy, !scanning, !appsWorking else { done?(false); return }
         uninstallApp(a, done)
@@ -401,17 +437,31 @@ extension MainWindowController {
             alert("Disk Space Analyzer can't uninstall itself. Quit it, then move it to the Trash in Finder.")
             done?(false); return
         }
+        guard let items = a.leftovers else {
+            // Its files are looked for first (as when the row is opened).
+            appsWorking = true
+            updateButtons()
+            statusLabel.stringValue = "Looking for the files of \(a.name)..."
+            loadAppItems(a) { [unowned self] in
+                self.appsWorking = false
+                self.updateButtons()
+                if a.leftovers == nil { done?(false) } else { self.uninstallApp(a, done) }
+            }
+            return
+        }
+        let total = items.reduce(Int64(0)) { $0 + max(0, $1.size) }
         let go = { [unowned self] in
             self.quitIfRunning(a) { ok in
-                guard ok else { done?(false); return }
-                self.offerVendorUninstaller(a) { self.trashApp(a, done) }
+                if ok { self.trashAll(a, items, total, done) } else { done?(false) }
             }
         }
         if appsAuto { go(); return }
         let al = NSAlert()
         al.alertStyle = .warning
-        al.messageText = "Uninstall \(a.name) (\(Fmt.size(a.size)))?"
-        al.informativeText = "The app is moved to the Trash. Then Disk Space Analyzer looks for its leftovers (settings, caches, support files) and lets you choose what to remove."
+        al.messageText = "Uninstall \(a.name)?"
+        var list = items.prefix(12).map { "    " + Fmt.shorten($0.path, 90) + "   (" + ($0.size < 0 ? "—" : Fmt.size($0.size)) + ")" }.joined(separator: "\n")
+        if items.count > 12 { list += "\n    ... and \(Fmt.count(items.count - 12)) more" }
+        al.informativeText = "The app and all its files are moved to the Trash (\(Fmt.size(total))):\n" + list
         al.addButton(withTitle: "Cancel")
         al.addButton(withTitle: "Uninstall")
         al.beginSheetModal(for: window!) { r in if r == .alertSecondButtonReturn { go() } else { done?(false) } }
@@ -443,134 +493,41 @@ extension MainWindowController {
         poll()
     }
 
-    /// When the app brings its own uninstaller: Run its uninstaller (then wait for it) or Move to Trash.
-    private func offerVendorUninstaller(_ a: InstalledApp, _ then: @escaping () -> Void) {
-        guard !appsAuto, let u = InstalledApp.vendorUninstaller(a, roots: appSearchRoots) else { then(); return }
-        let al = NSAlert()
-        al.messageText = "\(a.name) has its own uninstaller. Run it first?"
-        al.informativeText = "Its uninstaller may also remove parts installed elsewhere.\n\(u)"
-        al.addButton(withTitle: "Move to Trash")
-        al.addButton(withTitle: "Run its uninstaller")
-        al.beginSheetModal(for: window!) { [unowned self] r in
-            if r == .alertSecondButtonReturn { self.runVendorUninstaller(a, u, then) } else { then() }
-        }
-    }
-
-    /// Opens the vendor uninstaller and waits until it quits or the app is gone, or the user presses Continue.
-    private func runVendorUninstaller(_ a: InstalledApp, _ path: String, _ then: @escaping () -> Void) {
-        guard let win = window else { then(); return }
-        var launched: NSRunningApplication?
-        var finished = false
-        let wait = NSAlert()
-        wait.messageText = "Waiting for the uninstaller to finish..."
-        wait.informativeText = "Press Continue when it is done."
-        wait.addButton(withTitle: "Continue")
-        appsWorking = true
-        updateButtons()
-        wait.beginSheetModal(for: win) { [unowned self] _ in
-            if finished { return }
-            finished = true
-            self.appsWorking = false
-            then()
-        }
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: NSWorkspace.OpenConfiguration()) { r, _ in
-            DispatchQueue.main.async { launched = r }
-        }
-        var started = false
-        func poll() {
-            if finished { return }
-            if let l = launched, !l.isTerminated { started = true }
-            if (started && launched?.isTerminated == true) || !PathUtil.exists(a.path) {
-                win.endSheet(wait.window)
-                return
+    /// Moves the bundle and all its files to the Trash, then checks what is left.
+    private func trashAll(_ a: InstalledApp, _ items: [AppLeftover], _ total: Int64, _ done: ((Bool) -> Void)?) {
+        let targets = items.map { DeleteTarget(path: $0.path, label: PathUtil.name($0.path), isDir: $0.isDir, size: max(0, $0.size)) }
+        runDelete(targets, trash: appsTrash, showErrors: false) { [unowned self] _ in
+            var left: [AppLeftover] = []
+            for l in items where PathUtil.exists(l.path) {
+                l.size = InstalledApp.measureItem(l.path)
+                let admin = access(l.path, W_OK) != 0 || access(PathUtil.parent(l.path), W_OK) != 0
+                l.needsAdmin = l.needsAdmin || admin
+                l.note = l.needsAdmin ? "needs administrator" : "could not be moved (in use or protected)"
+                l.checked = !l.needsAdmin
+                left.append(l)
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { poll() }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { poll() }
-    }
-
-    /// Moves the bundle to the Trash (unless its uninstaller removed it), then looks for its leftovers.
-    private func trashApp(_ a: InstalledApp, _ done: ((Bool) -> Void)?) {
-        let gone = { [unowned self] in
-            a.uninstalled = true
-            self.findLeftovers(a) { found in
-                let size = a.leftoverSize
-                if found.isEmpty {
-                    self.apps?.removeAll { $0 === a }
-                    self.showApps()
-                    self.statusLabel.stringValue = "\(a.name) was removed completely."
-                } else {
-                    self.statusLabel.stringValue = "Moved \(a.name) to the Trash. Found \(Fmt.count(found.count)) leftover\(found.count == 1 ? "" : "s") (\(Fmt.size(size)))."
-                }
-                done?(true)
-            }
-        }
-        if !PathUtil.exists(a.path) { gone(); return }
-        let parent = PathUtil.parent(a.path)
-        if access(a.path, W_OK) != 0 || access(parent, W_OK) != 0 { cannotMove(a); done?(false); return }
-        let t = DeleteTarget(path: a.path, label: a.name, isDir: true, size: a.size)
-        runDelete([t], trash: appsTrash, showErrors: false) { [unowned self] _ in
-            if PathUtil.exists(a.path) { self.cannotMove(a); done?(false); return }
-            gone()
-        }
-    }
-
-    private func cannotMove(_ a: InstalledApp) {
-        statusLabel.stringValue = "\(a.name) could not be moved to the Trash."
-        if appsAuto { return }
-        let al = NSAlert()
-        al.messageText = "\(a.name) can't be moved to the Trash"
-        al.informativeText = "Disk Space Analyzer can't move it (owned by the system). Delete it in Finder (it asks for your password), then press Look for leftovers."
-        al.addButton(withTitle: "Show in Finder")
-        al.addButton(withTitle: "OK")
-        al.beginSheetModal(for: window!) { r in
-            if r == .alertFirstButtonReturn { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: a.path)]) }
-        }
-    }
-
-    /// Looks for an app's leftovers in the background and shows them under its row (checked, except admin-only ones).
-    func findLeftovers(_ a: InstalledApp, _ done: (([AppLeftover]) -> Void)? = nil) {
-        appsWorking = true
-        updateButtons()
-        statusLabel.stringValue = "Looking for leftovers of \(a.name)..."
-        let id = a.bundleId, name = a.name
-        DispatchQueue.global(qos: .userInitiated).async {
-            let found = InstalledApp.findLeftovers(bundleId: id, name: name)
-            DispatchQueue.main.async {
-                self.appsWorking = false
-                a.leftovers = found
-                a.expanded = true
-                self.showApps()
-                if let i = self.pApps.items.firstIndex(where: { $0.app === a && $0.groupOf == nil }) {
-                    self.pApps.select(IndexSet(integer: i))
-                    self.pApps.table.scrollRowToVisible(i)
-                }
-                done?(found)
-            }
-        }
-    }
-
-    /// Context menu "Look for leftovers": without uninstalling (an app deleted in Finder meanwhile counts as uninstalled).
-    func lookForLeftoversOfSelected(_ done: (([AppLeftover]) -> Void)? = nil) {
-        guard let a = selectedApp, !busy, !appsWorking else { done?([]); return }
-        if !a.uninstalled && !PathUtil.exists(a.path) { a.uninstalled = true }
-        findLeftovers(a) { [unowned self] found in
-            if found.isEmpty && a.uninstalled {
+            if left.isEmpty {
                 self.apps?.removeAll { $0 === a }
                 self.showApps()
-                self.statusLabel.stringValue = "\(a.name) was removed completely."
-            } else {
-                self.statusLabel.stringValue = found.isEmpty ? "No leftovers of \(a.name) found."
-                    : "Found \(Fmt.count(found.count)) leftover\(found.count == 1 ? "" : "s") of \(a.name) (\(Fmt.size(a.leftoverSize)))."
+                self.statusLabel.stringValue = "\(a.name) and all its files were moved to the Trash (\(Fmt.size(total)))."
+                done?(true)
+                return
             }
-            done?(found)
+            a.uninstalled = true
+            a.leftovers = left
+            a.expanded = true
+            self.showApps()
+            self.selectApp(a)
+            let n = left.count
+            self.statusLabel.stringValue = "\(a.name) was partly removed: \(Fmt.count(n)) item\(n == 1 ? "" : "s") could not be moved to the Trash (\(Fmt.size(a.leftoverSize)))."
+            done?(false)
         }
     }
 
-    /// Remove leftovers: moves the checked leftovers to the Trash, then measures what is left of them.
+    /// Remove leftovers: moves the checked items of partly removed apps to the Trash, then measures what is left.
     func removeCheckedLeftovers(_ done: (() -> Void)? = nil) {
         if busy || scanning || appsWorking { done?(); return }
-        let owners = (apps ?? []).filter { !$0.checkedLeftovers.isEmpty }
+        let owners = (apps ?? []).filter { $0.uninstalled && !$0.checkedLeftovers.isEmpty }
         let picked = owners.flatMap { a in a.checkedLeftovers.map { (a, $0) } }
         if picked.isEmpty { done?(); return }
         let total = picked.reduce(Int64(0)) { $0 + max(0, $1.1.size) }
@@ -590,7 +547,7 @@ extension MainWindowController {
                         keep.append(l)
                     }
                     a.leftovers = keep
-                    if keep.isEmpty && a.uninstalled { complete.append(a) }
+                    if keep.isEmpty { complete.append(a) }
                 }
                 self.apps?.removeAll { a in complete.contains { $0 === a } }
                 self.showApps()
