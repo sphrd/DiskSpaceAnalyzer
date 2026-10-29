@@ -30,24 +30,16 @@ final class InstalledApp {
     static func loadIcon(_ path: String) -> NSImage {
         let src = NSWorkspace.shared.icon(forFile: path)
         let s = iconSize
-        let scale: CGFloat = 2
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(s.width * scale), pixelsHigh: Int(s.height * scale),
-                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
-        let img = NSImage(size: s)
-        if let rep = rep, let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-            rep.size = s
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = ctx
-            ctx.imageInterpolation = .high
-            src.draw(in: NSRect(origin: .zero, size: s), from: .zero, operation: .copy, fraction: 1)
-            NSGraphicsContext.restoreGraphicsState()
-            img.addRepresentation(rep)
-        } else {
-            src.size = s
-            return src
-        }
-        return img
+        let px = Int(s.width * 2), py = Int(s.height * 2)      // 2x for Retina
+        var r = NSRect(x: 0, y: 0, width: px, height: py)
+        guard let cg = src.cgImage(forProposedRect: &r, context: nil, hints: nil),
+              let ctx = CGContext(data: nil, width: px, height: py, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { let c = src.copy() as! NSImage; c.size = s; return c }
+        ctx.interpolationQuality = .high
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: px, height: py))
+        guard let out = ctx.makeImage() else { let c = src.copy() as! NSImage; c.size = s; return c }
+        return NSImage(cgImage: out, size: s)
     }
 
     var publisher: String {
