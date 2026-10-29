@@ -245,6 +245,7 @@ extension MainWindowController {
                     self.remeasureAfterDelete(targets, job, measured)
                     self.current = nil
                     self.refreshTree(target ?? self.active?.node)
+                    self.markSuggestionsDirty()
                     self.viewsChanged()
                     self.updateDriveLabel()
                     if let v = self.lastView, !v.isHiddenOrHasHiddenAncestor { self.window?.makeFirstResponder(v) }

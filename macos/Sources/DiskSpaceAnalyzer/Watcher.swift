@@ -91,9 +91,10 @@ extension MainWindowController {
         fsPending.append(contentsOf: paths)
     }
 
-    /// Called when our own delete or rescan finishes: changes until now are already in the scan.
+    /// Called when our own delete or rescan finishes: changes until now are already in the scan. Only a short echo is
+    /// ignored, so changes made outside the app right after are not lost (an echo processed again is harmless).
     func ignoreOwnChanges() {
-        ignoreUntil = Date().addingTimeInterval(3)
+        ignoreUntil = Date().addingTimeInterval(0.5)
         fsPending.removeAll()
     }
 
@@ -168,6 +169,7 @@ extension MainWindowController {
         }
         if !files.isEmpty || !added.isEmpty || structure {
             livePending = true
+            markSuggestionsDirty()
             if structure { for p in pages where p !== pContents { p.stale = true } }
         }
         if livePending && Date().timeIntervalSince(lastLiveRefresh) >= 4 { refreshAfterLive() }
@@ -179,6 +181,7 @@ extension MainWindowController {
         lastLiveRefresh = Date()
         refreshTreeQuietly()
         updateDriveLabel()
+        if activePage === pSuggest && suggestDirty && !suggestFinding { pSuggest.stale = false; fillSuggestions(quiet: true) }
         guard let c = current, isAttached(c) else { return }
         if activePage !== pContents { return }
         if !contents.selectedRowIndexes.isEmpty || NSEvent.pressedMouseButtons != 0 { return }

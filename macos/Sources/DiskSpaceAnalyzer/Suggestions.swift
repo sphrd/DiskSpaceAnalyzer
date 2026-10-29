@@ -34,6 +34,22 @@ final class Suggestion {
     static func resetChecks(_ list: [Suggestion]) { for s in list { s.checkAll(s.safe) } }
     static func checkAll(_ list: [Suggestion], _ on: Bool) { for s in list { s.checkAll(on) } }
     static func checked(_ list: [Suggestion]) -> [DeleteTarget] { list.flatMap { $0.checkedTargets } }
+
+    /// After finding the suggestions again: each target keeps its check by path (new ones get the default) and each
+    /// suggestion its expanded state by name. Without an earlier list, the defaults.
+    static func carryOver(_ found: [Suggestion], from old: [Suggestion]?) {
+        guard let old = old else { resetChecks(found); return }
+        var checks: [String: Bool] = [:]
+        var open = Set<String>()
+        for s in old {
+            if s.expanded { open.insert(s.name) }
+            for (i, t) in s.targets.enumerated() { checks[PathUtil.trim(t.path)] = s.isChecked(i) }
+        }
+        for s in found {
+            s.expanded = open.contains(s.name)
+            s.checked = s.targets.map { checks[PathUtil.trim($0.path)] ?? s.safe }
+        }
+    }
 }
 
 extension MainWindowController {
@@ -56,21 +72,35 @@ extension MainWindowController {
         return p
     }
 
-    func fillSuggestions() {
+    func fillSuggestions(clear: Bool = false, quiet: Bool = false) {
         let p = pSuggest!
-        if suggestions != nil { showSuggestions(); return }
+        if suggestions != nil && !suggestDirty { showSuggestions(); return }
+        suggestDirty = false
+        suggestFinding = true
         suggestGen += 1
         let gen = suggestGen
-        p.setCaption("Looking for space that can be freed...")
-        p.setRows([], "Looking for space that can be freed...")
+        if suggestions == nil || clear {
+            p.setCaption("Looking for space that can be freed...")
+            p.setRows([], "Looking for space that can be freed...")
+        } else if !quiet {
+            p.setCaption("Looking again for space that can be freed (the scanned data changed)...")
+        }
         updateButtons()
         let scanned = roots.compactMap { $0.node }
         readInBackground({ [unowned self] in self.findSuggestions(scanned) }, { [weak self] found in
             guard let self = self, gen == self.suggestGen else { return }
-            Suggestion.resetChecks(found)
+            self.suggestFinding = false
+            Suggestion.carryOver(found, from: self.suggestions)
             self.suggestions = found
             self.showSuggestions()
         })
+    }
+
+    /// The scanned data changed (scan, rescan, live update, delete, measure): the suggestions are found again when the
+    /// view is shown next (viewsChanged / refreshAfterLive refill it at once when it is open).
+    func markSuggestionsDirty() {
+        suggestDirty = true
+        pSuggest?.stale = true
     }
 
     /// The suggestions shown in the view.
@@ -117,7 +147,7 @@ extension MainWindowController {
             var sel = IndexSet()
             for (i, it) in p.items.enumerated() {
                 if let k = suggestKey(it), keep.contains(k) { sel.insert(i) }
-                else if it.groupOf == nil, let s = it.suggestion, !s.expanded, s.targets.contains(where: { keep.contains(ObjectIdentifier($0)) }) { sel.insert(i) }
+                else if it.groupOf == nil, let s = it.suggestion, !s.expanded, s.targets.contains(where: { keep.contains(suggestKey(target: $0)) }) { sel.insert(i) }
             }
             p.select(sel)
         }
@@ -128,12 +158,15 @@ extension MainWindowController {
         if activePage === p { refreshChart() }
     }
 
-    /// Identity of a row across refills: its target (member rows) or its suggestion (heads).
-    private func suggestKey(_ it: ItemInfo) -> ObjectIdentifier? {
+    /// Identity of a row across refills (also when the suggestions were found again): its target's path (member rows)
+    /// or its suggestion's name (heads).
+    private func suggestKey(_ it: ItemInfo) -> String? {
         guard let s = it.suggestion else { return nil }
-        if it.groupOf != nil, let t = it.targets?.first { return ObjectIdentifier(t) }
-        return ObjectIdentifier(s)
+        if it.groupOf != nil, let t = it.targets?.first { return suggestKey(target: t) }
+        return "s\n" + s.name
     }
+
+    private func suggestKey(target t: DeleteTarget) -> String { "t\n" + PathUtil.trim(t.path) }
 
     func updateSuggestCaption() {
         let list = shownSuggestions
@@ -224,13 +257,14 @@ extension MainWindowController {
     }
 
     /// Deletes (or moves to the Trash) the checked targets, not the selected rows.
-    func deleteCheckedSuggestions(trash: Bool) {
-        if busy || scanning { return }
+    func deleteCheckedSuggestions(trash: Bool, _ done: ((DeleteJob?) -> Void)? = nil) {
+        if busy || scanning { done?(nil); return }
         let targets = Suggestion.checked(shownSuggestions)
-        if targets.isEmpty { return }
+        if targets.isEmpty { done?(nil); return }
         confirmAndDelete(targets, trash: trash) { [weak self] job in
-            guard let self = self, job != nil else { return }
+            guard let self = self, job != nil else { done?(job); return }
             self.basketChanged()
+            done?(job)
         }
     }
 

@@ -201,6 +201,8 @@ extension MainWindowController {
             head.size = each; head.chartValue = wasted
             head.folder = Set(g.map { $0.dir.fullPath }).count == 1 ? "same folder" : ""
             head.cells = [head.name, Fmt.size(each), Fmt.size(wasted), head.folder, ""]
+            let dirs = Set(g.map { $0.dir.fullPath })
+            head.tip = "\(g[0].name)\n" + (dirs.count == 1 ? dirs.first! : "\(Fmt.count(dirs.count)) folders")
             rows.append(head)
             for f in g {
                 let it = ItemInfo.forFile(f, 0)

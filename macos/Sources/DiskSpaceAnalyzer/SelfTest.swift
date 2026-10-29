@@ -250,6 +250,7 @@ final class SelfTestRun {
                 Suggestion.resetChecks(list)
                 self.check(nm.checkState == 1 && fake.checkState == 0, "suggestions view: safe items start checked, review-first items unchecked")
                 w.suggestions = list
+                w.suggestDirty = false
                 w.viewTabs.selectedIndex = w.pages.firstIndex { $0 === w.pSuggest } ?? 4
                 w.showSuggestions()
                 w.checkAllSuggestions(true)
@@ -270,17 +271,56 @@ final class SelfTestRun {
                 let head = pg.items.first { $0.suggestion === fake && $0.groupOf == nil }
                 self.check(clicked && fake.checkState == 2 && head?.check == 2 && Suggestion.checked(list).count == 1 && w.btnSugDelete.isEnabled,
                            "suggestions view: clicking a child's checkbox checks it; its head shows mixed")
-                w.deleteCheckedSuggestions(trash: false)
-                next()
+                w.deleteCheckedSuggestions(trash: false) { _ in
+                    // Checked when the delete is done, before the suggestions are found again in the background.
+                    self.check(!PathUtil.exists(self.P("F/f1.bin")) && PathUtil.exists(self.P("F/f2.bin")) && PathUtil.exists(self.P("P/node_modules")),
+                               "suggestions view: Delete permanently deleted only the checked item")
+                    let fake = w.suggestions?.first { $0.name == "Old test files" }
+                    self.check(fake != nil && fake!.targets.count == 1 && fake!.size == 5000 && fake!.checkState == 0,
+                               "suggestions view: re-measured after the delete (\(fake?.targets.count ?? -1) items, \(fake?.size ?? -1) bytes left)")
+                    self.check(w.suggestFinding, "suggestions: marked out of date by the delete and found again (open view)")
+                    next()
+                }
             })
         }
-        steps.waitUntil(20) { !w.busy }
+        // Found again after the delete: the user's choices carry over (node_modules was unchecked by Deselect all).
+        steps.waitUntil(90) { !w.suggestFinding }
         steps.then {
-            self.check(!PathUtil.exists(self.P("F/f1.bin")) && PathUtil.exists(self.P("F/f2.bin")) && PathUtil.exists(self.P("P/node_modules")),
-                       "suggestions view: Delete permanently deleted only the checked item")
-            let fake = w.suggestions?.first { $0.name == "Old test files" }
-            self.check(fake != nil && fake!.targets.count == 1 && fake!.size == 5000 && fake!.checkState == 0,
-                       "suggestions view: re-measured after the delete (\(fake?.targets.count ?? -1) items, \(fake?.size ?? -1) bytes left)")
+            let nm = w.suggestions?.first { $0.name == "node_modules folders" }
+            self.check(nm != nil && nm!.targets.count == 1 && nm!.checkState == 0 && w.suggestions?.contains(where: { $0.name == "Old test files" }) == false,
+                       "suggestions: found again after the delete, the unchecked node_modules stays unchecked")
+        }
+        // Deleted outside the app: live updates drop the folder and the open Suggestions view finds them again.
+        steps.wait(3.5)
+        steps.then { try? FileManager.default.removeItem(atPath: self.P("P/node_modules")) }
+        steps.waitUntil(20) { self.find("P/node_modules") == nil }
+        steps.waitUntil(60) {
+            !w.suggestDirty && !w.suggestFinding && w.suggestions?.contains(where: { $0.name == "node_modules folders" }) == false
+        }
+        steps.then {
+            let stillListed = w.pSuggest.items.contains { $0.suggestion?.name == "node_modules folders" }
+            self.check(self.find("P/node_modules") == nil && w.suggestions != nil
+                       && w.suggestions?.contains(where: { $0.name == "node_modules folders" }) == false && !stillListed,
+                       "suggestions: refreshed after an outside delete (node_modules of P gone)")
+        }
+        // Tooltips: the full name, then the full path (a folder's own path, a file's folder).
+        steps.then {
+            guard let c = self.find("C"), let f = Scanner.listFiles(c).first(where: { $0.name == "dup1.bin" }) else {
+                self.check(false, "tooltip: C or dup1.bin not in the scan"); return
+            }
+            let ft = ItemInfo.forFile(f, 0).toolTip.components(separatedBy: "\n")
+            let dt = ItemInfo.forDir(c, 0).toolTip.components(separatedBy: "\n")
+            let tt = (w.treeToolTip(c) ?? "").components(separatedBy: "\n")
+            self.check(ft.count == 2 && ft[0] == "dup1.bin" && PathUtil.same(ft[1], self.P("C")),
+                       "tooltip: file row shows name and folder (\(ft.joined(separator: " | ")))")
+            self.check(dt.count == 2 && dt[0] == "C" && PathUtil.same(dt[1], self.P("C")) && tt == dt,
+                       "tooltip: folder row and tree node show name and path (\(dt.joined(separator: " | ")))")
+            w.viewTabs.selectedIndex = 0
+            w.selectDir(c)
+            let pc = w.pContents!
+            let row = pc.items.firstIndex { $0.file?.name == "dup1.bin" } ?? -1
+            let cell = row >= 0 ? pc.table.view(atColumn: 0, row: row, makeIfNecessary: true) : nil
+            self.check(cell?.toolTip != nil && cell?.toolTip == pc.items[row].toolTip, "tooltip: the list cell carries the row's tooltip")
         }
         steps.run {
             try? self.log.write(toFile: self.dir + ".log", atomically: true, encoding: .utf8)

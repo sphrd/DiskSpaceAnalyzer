@@ -206,7 +206,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var dupeTimer: Timer?
     var onDupesFinished: (() -> Void)?
     // Suggestions view
-    lazy var btnLookAgain = RoundButton("Look again", .secondary) { [unowned self] in self.suggestions = nil; self.fillSuggestions() }
+    lazy var btnLookAgain = RoundButton("Look again", .secondary) { [unowned self] in self.suggestDirty = true; self.fillSuggestions(clear: true) }
     lazy var btnSugAll = RoundButton("Select all", .secondary) { [unowned self] in self.checkAllSuggestions(true) }
     lazy var btnSugNone = RoundButton("Deselect all", .secondary) { [unowned self] in self.checkAllSuggestions(false) }
     lazy var btnSugAdd = RoundButton("Add to delete list", .secondary) { [unowned self] in self.addCheckedSuggestions() }
@@ -214,6 +214,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     lazy var btnSugDelete = RoundButton("Delete permanently", .warn) { [unowned self] in self.deleteCheckedSuggestions(trash: false) }
     var suggestGen = 0
     var suggestions: [Suggestion]?
+    var suggestDirty = false          // the scanned data changed since the suggestions were found: find them again
+    var suggestFinding = false
     // Delete list
     var basket: [DeleteTarget] = []
     lazy var btnBasketRemove = RoundButton("Remove from list", .secondary) { [unowned self] in self.removeFromBasket() }
@@ -610,6 +612,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
                     else { goTo = result }
                     if self.active === target { self.current = nil }
                     self.refreshTree(goTo, fallback: target)
+                    self.markSuggestionsDirty()
                     self.viewsChanged()
                     self.updateDriveLabel()
                     self.statusLabel.stringValue = "\(result.name): \(Fmt.size(result.size)) in \(Fmt.count(result.files)) files and \(Fmt.count(result.dirs)) folders - scanned in \(String(format: "%.2f", Date().timeIntervalSince(started))) s" + (s.cancelled ? "  (stopped - partial results)" : "")
@@ -791,7 +794,15 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             c.pct = Fmt.pct(c.bar)
         }
         c.needsDisplay = true
+        c.toolTip = treeToolTip(item)
         return c
+    }
+
+    /// Tooltip of a tree node: its full name, then its full path (a drive: its name and mount point).
+    func treeToolTip(_ item: Any) -> String? {
+        if let r = item as? ScanRoot { return r.displayName + "\n" + (r.node?.fullPath ?? r.path) }
+        if let d = item as? DirNode { let p = d.fullPath; return ItemInfo.nameOf(p) + "\n" + p }
+        return nil
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -905,6 +916,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             s.name = "[\(Fmt.count(files.count - maxShown)) smaller files not listed]"
             s.size = rest; s.files = Int64(files.count - maxShown)
             s.percent = d.size > 0 ? 100 * Double(rest) / Double(d.size) : 0
+            s.tip = s.name + "\n" + d.fullPath
             items.append(s)
         }
         setChanges(d, items)
@@ -1064,6 +1076,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             let keep = self.current
             self.current = nil
             if let k = keep, self.isAttached(k) { self.refreshTree(k) } else if self.active != nil { self.refreshTree(nil) }
+            self.markSuggestionsDirty()
             self.viewsChanged()
             self.statusLabel.stringValue = onDisk
                 ? "Showing size on disk: the space files really take (whole blocks; files not downloaded from iCloud take nothing; hard links count once)."
@@ -1096,6 +1109,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
                     self.ignoreOwnChanges()
                     self.current = nil
                     self.refreshTree(target)
+                    self.markSuggestionsDirty()
                     self.viewsChanged()
                     self.updateDriveLabel()
                     self.statusLabel.stringValue = "Rescanned \(path): \(Fmt.size(fresh.size)) in \(String(format: "%.2f", Date().timeIntervalSince(started))) s"

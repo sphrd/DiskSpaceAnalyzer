@@ -235,6 +235,7 @@ extension MainWindowController {
             it.name = path; it.change = -pc.size; it.files = pc.size; it.folderIcon = true; it.chartValue = 0
             shrank += pc.size
             it.cells = [it.name, changeText(it), "removed", Fmt.size(pc.size)]
+            it.tip = ItemInfo.nameOf(path) + "\n" + path
             it.color = T.MUTED
             rows.append(it)
         }

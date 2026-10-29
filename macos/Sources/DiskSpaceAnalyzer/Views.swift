@@ -23,6 +23,30 @@ final class ItemInfo {
     var chartSize: Int64 { chartValue >= 0 ? chartValue : size }
     var canDelete: Bool { !isSummary && !isGroup && (isDir || file != nil || targets != nil) }
     var fullPath: String? { isDir ? dir?.fullPath : (file?.fullPath ?? path) }
+    var tip: String?                   // tooltip set by the view (file types, summaries, group heads, removed folders)
+
+    /// Shown when hovering the row: the full name on the first line, the full path on the second (a folder's own path,
+    /// a file's folder; a suggestion its location or how many locations it has; the Trash "Trash").
+    var toolTip: String {
+        if let t = tip { return t }
+        if let s = suggestion, groupOf == nil {
+            let loc = s.targets.contains(where: { $0.emptyTrash }) ? "Trash"
+                : s.targets.count == 1 ? s.targets[0].path
+                : s.targets.count > 1 ? "\(Fmt.count(s.targets.count)) locations" : s.location
+            return s.name + "\n" + loc
+        }
+        if let ts = targets, ts.count == 1 {
+            let t = ts[0]
+            if t.emptyTrash { return t.label + "\n" + "Trash" }
+            return ItemInfo.nameOf(t.path) + "\n" + (t.isDir ? PathUtil.trim(t.path) : PathUtil.parent(t.path))
+        }
+        if let f = file { return f.name + "\n" + f.dir.fullPath }
+        if let d = dir { let p = d.fullPath; return ItemInfo.nameOf(p) + "\n" + p }
+        if let p = path { return ItemInfo.nameOf(p) + "\n" + (isDir || folderIcon ? PathUtil.trim(p) : PathUtil.parent(p)) }
+        return folder.isEmpty ? name : name + "\n" + folder
+    }
+
+    static func nameOf(_ p: String) -> String { let n = PathUtil.name(p); return n.isEmpty ? p : n }
 
     static func forDir(_ d: DirNode, _ parentSize: Int64) -> ItemInfo {
         let it = ItemInfo()
@@ -404,6 +428,7 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         c.index = Int(col.identifier.rawValue.dropFirst()) ?? 0
         c.page = self
         c.item = items[row]
+        c.toolTip = items[row].toolTip
         c.needsDisplay = true
         return c
     }

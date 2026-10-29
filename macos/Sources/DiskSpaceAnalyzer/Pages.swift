@@ -248,6 +248,7 @@ extension MainWindowController {
                 rest.size = found.size - shown; rest.files = found.count - Int64(found.files.count)
                 rest.percent = 100 * Double(found.size - shown) / Double(folder)
                 rest.cells = [rest.name, Fmt.size(rest.size), Fmt.pct(rest.percent), "", "", ""]
+                rest.tip = rest.name + "\n" + scopePath
                 rows.append(rest)
             }
             return (rows, found.count, found.size, found.files.count)
@@ -304,6 +305,7 @@ extension MainWindowController {
                 if byCategory { it.name = k; it.category = k }
                 else { it.ext = k; it.name = k.isEmpty ? "(no extension)" : "." + k; it.category = FileTypes.category(k) }
                 it.cells = [it.name, Fmt.size(it.size), Fmt.pct(it.percent), Fmt.count(it.files), byCategory ? "" : it.category]
+                it.tip = MainWindowController.typeTip(it.name, it.files, scopePath)
                 rows.append(it)
             }
             return (rows, sc.size)
@@ -316,5 +318,10 @@ extension MainWindowController {
             p.empty = "No files."
             if self.activePage === p { self.refreshChart() }
         })
+    }
+
+    /// Tooltip of a file type row: the type, then how many files of it the folder holds.
+    static func typeTip(_ type: String, _ files: Int64, _ scopePath: String) -> String {
+        "\(type)\n\(Fmt.count(files)) file\(files == 1 ? "" : "s") in \(scopePath)"
     }
 }
