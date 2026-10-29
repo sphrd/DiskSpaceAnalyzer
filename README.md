@@ -70,6 +70,10 @@ open list, and hovering a slice highlights its row and the other way round)
 - **Changes:** which folders grew or shrank since the previous scan.
 - Hover any row or folder to see its full name and path.
 
+![Suggestions: how much can be freed, with a checkbox tree of every location (macOS)](assets/screenshot-suggestions.png)
+
+![Apps: every installed app with its logo and size; expanded, it shows all its files (macOS)](assets/screenshot-apps.png)
+
 ![Duplicates: groups of identical files and the space their extra copies take (demo data)](assets/screenshot-duplicates.png)
 
 **Cleaning up**
