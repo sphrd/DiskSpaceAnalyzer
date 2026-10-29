@@ -141,6 +141,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
   checker." Chosen: Apps tab after Suggestions; official uninstaller first, then leftovers; Windows registry leftovers with a .reg
   backup; Microsoft Store apps included; macOS too. Registry checker: later.
 
+- 2026-10-29: "not same as windows, i want it to show the app when u open th etree to show all the files that have been added by that
+  app, after official uninnstaller runs, it should recheck the remainder of files and ask to delete them as well." Confirmed: both
+  platforms; macOS: one confirmation, app and all its files to the Trash together.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -345,6 +349,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
   name without version/bitness, folder name, key name (`_is1` stripped); generic words never match; a publisher folder only when
   all it holds is the app. Admin-only items start unchecked without elevation. Registry keys: `reg export` appended to
   `%LOCALAPPDATA%\DiskSpaceAnalyzer\registry-backups\<app> <date>.reg` before `DeleteSubKeyTree`; a key that can't be backed up is kept.
+- **Apps flow (v1.8):** every app expands (first time: search in the background) into all its items, program folder first
+  (child rows `<Kind>: <name>`, no checkboxes while installed). Uninstall: official uninstaller, then the same search again; if anything
+  remains a dialog lists it and asks `Delete them too?` (Yes = delete with registry backup; No = keep as checkable leftovers).
+  macOS: one confirmation moves the bundle and all its items to the Trash. `Look for leftovers` menu item removed.
 - **Gotcha:** `Directory.GetDirectories` on .NET 4 (no 4.6.2 target) rejects `\\?\` paths; the leftover search silently found
   nothing until it used plain paths (these roots are short).
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one

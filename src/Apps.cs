@@ -56,7 +56,6 @@ namespace DiskSpaceAnalyzer
         bool appsLoading;
         SearchBox appSearch;
         RoundButton btnAppUninstall, btnAppLeftovers;
-        ToolStripMenuItem miLookLeftovers;
         volatile bool waitContinue;
         /// <summary>Self-test: extra uninstall roots to read (e.g. a fake app's key) and no Store apps.</summary>
         internal bool AppsTestMode;
@@ -89,14 +88,7 @@ namespace DiskSpaceAnalyzer
             p.Empty = "No apps found.";
             p.Fill = FillApps;
 
-            miLookLeftovers = new ToolStripMenuItem("Look for leftovers", null, (s, e) => LookForSelectedLeftovers()) { ForeColor = Theme.FG };
-            menu.Items.Insert(menu.Items.IndexOf(miRescan) + 1, miLookLeftovers);
-            menu.Opening += (s, e) =>
-            {
-                var a = SelectedApp();
-                miLookLeftovers.Visible = lastView == list;
-                miLookLeftovers.Enabled = a != null && !busy && !a.IsStore;
-            };
+
             return p;
         }
 
@@ -164,13 +156,14 @@ namespace DiskSpaceAnalyzer
             foreach (var a in shown.OrderByDescending(a => a.Leftovers != null && a.Leftovers.Count > 0).ThenByDescending(a => a.Size))
             {
                 bool hasLeft = a.Leftovers != null && a.Leftovers.Count > 0;
+                bool canExpand = a.SharedWith == null && (a.Leftovers == null || hasLeft);
                 long leftSize = hasLeft ? a.Leftovers.Sum(l => l.Size) : 0;
                 var head = new ItemInfo
                 {
                     Data = a, Name = a.Uninstalled ? a.Name + "  (uninstalled -- leftovers)" : a.Name, Size = a.Uninstalled ? leftSize : a.Size,
                     FolderIcon = true, Path = string.IsNullOrEmpty(a.Location) ? null : a.Location, Folder = a.Location,
                     Category = a.Publisher, Note = a.Version, Percent = total > 0 && !a.Uninstalled ? 100.0 * a.Size / total : 0,
-                    Expandable = hasLeft, Expanded = a.Expanded, Check = hasLeft ? LeftoverState(a) : -1
+                    Expandable = canExpand, Expanded = a.Expanded && hasLeft, Check = a.Uninstalled && hasLeft ? LeftoverState(a) : -1
                 };
                 string where = a.SharedWith != null ? "same folder as " + a.SharedWith : a.IsStore && string.IsNullOrEmpty(a.Location) ? "Microsoft Store" : a.Location;
                 var lvi = Row(head, head.Name, a.Size > 0 || a.Uninstalled ? Fmt.Size(head.Size) : "", a.Uninstalled || a.SharedWith != null ? "" : head.Percent.ToString("0.0") + " %",
@@ -183,8 +176,8 @@ namespace DiskSpaceAnalyzer
                 {
                     var it = new ItemInfo
                     {
-                        Data = l, GroupOf = head, Name = l.Label, Size = l.Size, FolderIcon = l.IsDir || l.IsRegistry, Path = l.Path, Folder = l.Path,
-                        Note = l.Kind, Check = l.Checked ? 1 : 0,
+                        Data = l, GroupOf = head, Name = KindName(l.Kind) + ": " + l.Label, Size = l.Size, FolderIcon = l.IsDir || l.IsRegistry, Path = l.Path, Folder = l.Path,
+                        Note = l.Kind, Check = a.Uninstalled ? (l.Checked ? 1 : 0) : -1,
                         Targets = l.IsRegistry ? null : new List<DeleteTarget> { new DeleteTarget { Path = l.Path, Label = l.Label, IsDir = l.IsDir, Size = l.Size } }
                     };
                     rows.Add(Row(it, it.Name, l.IsRegistry ? "--" : Fmt.Size(l.Size), "", l.Kind, l.Note, "", l.Path));
@@ -196,7 +189,7 @@ namespace DiskSpaceAnalyzer
             if (keepSel != null)
                 foreach (ListViewItem it in lv.Items) if (((ItemInfo)it.Tag).Data == keepSel) { it.Selected = true; break; }
             int installed = apps.Count(a => !a.Uninstalled);
-            p.Caption.Text = string.Format("{0:N0} apps, {1}{2}.  Select an app and press Uninstall: its own uninstaller runs first, then you choose which leftovers to remove.",
+            p.Caption.Text = string.Format("{0:N0} apps, {1}{2}.  Expand an app to see all its files and settings. Uninstall runs its own uninstaller, then offers to delete whatever remains.",
                 installed, Fmt.Size(apps.Where(a => !a.Uninstalled).Sum(a => a.Size)), q.Length > 0 ? string.Format(" ({0:N0} shown)", shown.Count) : "");
             p.ChartSub = Fmt.Size(total) + " in apps";
             p.ChartTotal = 0;
@@ -210,6 +203,14 @@ namespace DiskSpaceAnalyzer
             if (d.Length == 8 && d.All(char.IsDigit)) return d.Substring(0, 4) + "-" + d.Substring(4, 2) + "-" + d.Substring(6, 2);
             DateTime t;
             return DateTime.TryParse(d, out t) ? t.ToString("yyyy-MM-dd") : d;
+        }
+
+        /// <summary>Short kind for a child row's name ("Settings (AppData\Roaming)" -> "Settings").</summary>
+        static string KindName(string kind)
+        {
+            int i = (kind ?? "").IndexOf(" (", StringComparison.Ordinal);
+            string k = i > 0 ? kind.Substring(0, i) : kind ?? "";
+            return kind != null && kind.Contains("(registry)") ? "Registry" : k;
         }
 
         static int LeftoverState(InstalledApp a)
@@ -231,14 +232,14 @@ namespace DiskSpaceAnalyzer
             if (btnAppUninstall == null) return;
             var a = SelectedApp();
             btnAppUninstall.Enabled = a != null && !a.Uninstalled && !busy && !scanning;
-            btnAppLeftovers.Enabled = apps != null && apps.Any(x => x.Leftovers != null && x.Leftovers.Any(l => l.Checked)) && !busy && !scanning;
+            btnAppLeftovers.Enabled = apps != null && apps.Any(x => x.Uninstalled && x.Leftovers != null && x.Leftovers.Any(l => l.Checked)) && !busy && !scanning;
         }
 
         void AppGlyph(ListViewItem lvi, bool checkbox)
         {
             var info = (ItemInfo)lvi.Tag;
             var a = info.Data as InstalledApp;
-            if (!checkbox) { if (a != null) { a.Expanded = !a.Expanded; ShowApps(); } return; }
+            if (!checkbox) { if (a != null) ExpandApp(a, !a.Expanded); return; }
             if (a != null && a.Leftovers != null) { bool on = LeftoverState(a) != 1; foreach (var l in a.Leftovers) l.Checked = on; }
             else { var l = info.Data as Leftover; if (l != null) l.Checked = !l.Checked; }
             ShowApps();
@@ -462,8 +463,8 @@ namespace DiskSpaceAnalyzer
         {
             if (a == null || a.Uninstalled || busy || scanning) return;
             if (SelfTestDir == null && MessageBox.Show(this,
-                    string.Format("Uninstall {0}{1}?\n\nIts own uninstaller runs first (finish its steps). Then Disk Space Analyzer looks for what it left behind " +
-                        "(settings, caches, shortcuts, registry keys) and lets you choose what to remove.", a.Name, a.Size > 0 ? " (" + Fmt.Size(a.Size) + ")" : ""),
+                    string.Format("Uninstall {0}{1}?\n\nIts own uninstaller runs first (finish its steps). Then Disk Space Analyzer checks all the app's files " +
+                        "and settings again and offers to delete whatever is left.", a.Name, a.Size > 0 ? " (" + Fmt.Size(a.Size) + ")" : ""),
                     AppName + " - uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
 
             bool done = await RunUninstaller(a);
@@ -473,14 +474,50 @@ namespace DiskSpaceAnalyzer
                 return;
             }
             a.Uninstalled = true;
-            await FindLeftovers(a);
+            await FindLeftovers(a);            // check again: what did the uninstaller leave?
             a.Expanded = true;
-            if (a.Leftovers.Count == 0) { apps.Remove(a); statusLabel.Text = a.Name + " was removed completely."; }
-            else statusLabel.Text = string.Format("Uninstalled {0}. Found {1:N0} leftover{2} ({3}): check what to remove, then press Remove leftovers.",
-                a.Name, a.Leftovers.Count, a.Leftovers.Count == 1 ? "" : "s", Fmt.Size(a.Leftovers.Sum(l => l.Size)));
+            if (a.Leftovers.Count == 0)
+            {
+                apps.Remove(a);
+                statusLabel.Text = a.Name + " was removed completely.";
+                ViewsChanged();
+                ShowApps();
+                return;
+            }
             ViewsChanged();
             ShowApps();
             RevealApp(a);
+            var rest = a.Leftovers;
+            string list = string.Join("\n", rest.Take(12).Select(l => "    " + Fmt.Shorten(l.Path, 90) + (l.IsRegistry ? "" : "   (" + Fmt.Size(l.Size) + ")") +
+                (l.Note.Length > 0 ? "  -- " + l.Note : "")));
+            if (rest.Count > 12) list += string.Format("\n    ... and {0:N0} more", rest.Count - 12);
+            bool yes = SelfTestDir != null || MessageBox.Show(this,
+                string.Format("{0} was uninstalled, but {1:N0} item{2} ({3}) remain:\n\n{4}\n\nDelete them too?{5}\n\nThis bypasses the Recycle Bin and CANNOT be undone.",
+                    a.Name, rest.Count, rest.Count == 1 ? "" : "s", Fmt.Size(rest.Sum(l => l.Size)), list,
+                    rest.Any(l => l.IsRegistry) ? " Registry keys are saved to a .reg backup first." : ""),
+                AppName + " - leftovers of " + a.Name, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1) == DialogResult.Yes;
+            if (!yes)
+            {
+                statusLabel.Text = string.Format("Uninstalled {0}. {1:N0} leftover{2} ({3}) kept: check any of them and press Remove leftovers to delete them later.",
+                    a.Name, rest.Count, rest.Count == 1 ? "" : "s", Fmt.Size(rest.Sum(l => l.Size)));
+                return;
+            }
+            foreach (var x in apps.Where(x => x != a && x.Leftovers != null)) foreach (var l in x.Leftovers) l.Checked = false;
+            foreach (var l in rest) l.Checked = true;
+            await RemoveLeftovers(false);
+        }
+
+        /// <summary>Expands an app into all its files and settings (found in the background the first time).</summary>
+        async void ExpandApp(InstalledApp a, bool expand)
+        {
+            if (!expand) { a.Expanded = false; ShowApps(); return; }
+            if (a.Leftovers == null) await FindLeftovers(a);
+            a.Expanded = true;
+            ShowApps();
+            if (!a.Uninstalled)
+                statusLabel.Text = a.Leftovers.Count == 0 ? a.Name + ": no files or settings found."
+                    : string.Format("{0}: {1:N0} item{2}, {3} in total (program folder, data, settings{4}).", a.Name, a.Leftovers.Count,
+                        a.Leftovers.Count == 1 ? "" : "s", Fmt.Size(a.Leftovers.Sum(l => l.Size)), a.Leftovers.Any(l => l.IsRegistry) ? ", registry" : "");
         }
 
         /// <summary>Selects an app's row and scrolls it into view (the list otherwise keeps its scroll position).</summary>
@@ -598,27 +635,10 @@ namespace DiskSpaceAnalyzer
 
         // ---------------------------------------------------------------- leftovers
 
-        void LookForSelectedLeftovers()
-        {
-            var a = SelectedApp();
-            if (a == null || busy) return;
-            LookForLeftovers(a);
-        }
-
-        async void LookForLeftovers(InstalledApp a)
-        {
-            await FindLeftovers(a);
-            a.Expanded = true;
-            ShowApps();
-            RevealApp(a);
-            statusLabel.Text = a.Leftovers.Count == 0 ? "No leftovers of " + a.Name + " found outside its program folder."
-                : string.Format("{0}: {1:N0} related item{2} outside its program folder ({3}).", a.Name, a.Leftovers.Count, a.Leftovers.Count == 1 ? "" : "s",
-                    Fmt.Size(a.Leftovers.Sum(l => l.Size)));
-        }
 
         async Task FindLeftovers(InstalledApp a)
         {
-            statusLabel.Text = "Looking for leftovers of " + a.Name + "...";
+            statusLabel.Text = (a.Uninstalled ? "Checking what is left of " : "Finding the files and settings of ") + a.Name + "...";
             List<Leftover> found = null;
             await Task.Run(() => { found = SearchLeftovers(a); });
             a.Leftovers = found ?? new List<Leftover>();
@@ -661,17 +681,17 @@ namespace DiskSpaceAnalyzer
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Action<string, string, bool> addPath = (path, kind, isDir) =>
             {
-                // While the app is installed, its program folder is not a leftover.
-                if (!a.Uninstalled && !string.IsNullOrEmpty(a.Location) && (IsWithin(path, a.Location) || IsWithin(a.Location, path))) return;
+                // Things inside the program folder are covered by the folder itself.
+                if (!string.IsNullOrEmpty(a.Location) && !SamePath(path, a.Location) && IsWithin(path, a.Location)) return;
                 if (!seen.Add(path.TrimEnd('\\'))) return;
                 var l = new Leftover { Path = path, Label = Native.FileName(path), Kind = kind, IsDir = isDir };
                 try { l.Size = isDir ? new Scanner().Run(path).Size : new FileInfo(path).Length; } catch (Exception) { }
                 result.Add(l);
             };
 
-            // The program folder itself, if the uninstaller left it.
-            if (!string.IsNullOrEmpty(a.Location) && Native.IsDirectory(a.Location) && a.Uninstalled && !a.IsStore)
-                addPath(a.Location, "Program folder", true);
+            // The program folder first (after an uninstall: if the uninstaller left it).
+            if (!string.IsNullOrEmpty(a.Location) && Native.IsDirectory(a.Location) && a.SharedWith == null)
+                addPath(a.Location, a.IsStore ? "App package" : "Program folder", true);
 
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -799,20 +819,20 @@ namespace DiskSpaceAnalyzer
 
         // ---------------------------------------------------------------- removing leftovers
 
-        async void RemoveCheckedLeftovers() { await RemoveLeftovers(); }
+        async void RemoveCheckedLeftovers() { await RemoveLeftovers(true); }
 
         /// <summary>Removes the checked leftovers of all apps; returns the .reg backup file (null when no keys were removed).</summary>
-        async Task<string> RemoveLeftovers()
+        async Task<string> RemoveLeftovers(bool confirm)
         {
             if (busy || scanning || apps == null) return null;
-            var owners = apps.Where(x => x.Leftovers != null && x.Leftovers.Any(l => l.Checked)).ToList();
+            var owners = apps.Where(x => x.Uninstalled && x.Leftovers != null && x.Leftovers.Any(l => l.Checked)).ToList();
             var items = owners.SelectMany(x => x.Leftovers.Where(l => l.Checked)).ToList();
             if (items.Count == 0) return null;
             long total = items.Sum(l => l.Size);
             string list = string.Join("\n", items.Take(12).Select(l => "    " + Fmt.Shorten(l.Path, 90) + (l.IsRegistry ? "" : "   (" + Fmt.Size(l.Size) + ")")));
             if (items.Count > 12) list += string.Format("\n    ... and {0:N0} more", items.Count - 12);
             string who = owners.Count == 1 ? owners[0].Name : owners.Count + " apps";
-            if (SelfTestDir == null && MessageBox.Show(this,
+            if (confirm && SelfTestDir == null && MessageBox.Show(this,
                     string.Format("Permanently remove {0:N0} leftover{1} of {2} ({3})?\n\n{4}\n\n{5}This bypasses the Recycle Bin and CANNOT be undone.",
                         items.Count, items.Count == 1 ? "" : "s", who, Fmt.Size(total), list,
                         items.Any(l => l.IsRegistry) ? "Registry keys are saved to a .reg backup first (in " + BackupFolder + ").\n\n" : ""),

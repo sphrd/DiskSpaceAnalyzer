@@ -137,11 +137,11 @@ namespace DiskSpaceAnalyzer
                     if (p == pApps)
                     {
                         for (int k = 0; k < 600 && (apps == null || appsLoading); k++) await Task.Delay(200);
-                        // Show what "Look for leftovers" finds for the first app that has some (read only).
-                        foreach (var a in apps.Where(x => !x.IsStore).Take(15).ToList())
+                        // Expand the first app with files outside its program folder (read only).
+                        foreach (var a in apps.Where(x => !x.IsStore && x.SharedWith == null).Take(15).ToList())
                         {
                             await FindLeftovers(a);
-                            if (a.Leftovers.Count > 0) { a.Expanded = true; ShowApps(); RevealApp(a); break; }
+                            if (a.Leftovers.Count > 1) { a.Expanded = true; ShowApps(); RevealApp(a); break; }
                         }
                     }
                     await Task.Delay(i == 0 ? 2500 : 2000);
@@ -374,19 +374,22 @@ namespace DiskSpaceAnalyzer
                     "apps: the installed app is listed with version, publisher, size and folder" + (app != null ? " (" + app.Size + " bytes)" : ""));
                 if (app == null) return;
 
-                await UninstallApp(app);
+                // Expanding shows everything that belongs to the app, without changing anything.
+                ExpandApp(app, true);
+                for (int i = 0; i < 50 && app.Leftovers == null; i++) await Task.Delay(100);
                 var names = app.Leftovers != null ? string.Join(", ", app.Leftovers.Select(l => l.Kind + ": " + l.Label)) : "none";
-                check(app.Uninstalled && !Directory.Exists(appDir) && app.Leftovers != null && app.Leftovers.Count == 3 &&
+                check(app.Leftovers != null && app.Leftovers.Count == 4 && SamePath(app.Leftovers[0].Path, appDir) &&
                       app.Leftovers.Any(l => SamePath(l.Path, local)) && app.Leftovers.Any(l => SamePath(l.Path, roam)) &&
-                      app.Leftovers.Any(l => l.IsRegistry && l.SubKey == @"Software\DSA SelfTest App"),
-                    "apps: uninstaller ran; leftovers found in AppData and the registry (" + names + ")");
+                      app.Leftovers.Any(l => l.IsRegistry && l.SubKey == @"Software\DSA SelfTest App") && Directory.Exists(appDir),
+                    "apps: expanding lists all its items: program folder, AppData folders, registry key (" + names + ")");
 
-                foreach (var l in app.Leftovers) l.Checked = true;
-                backup = await RemoveLeftovers();
+                // Uninstall: the official uninstaller removes the program folder; the rest is checked again and deleted (confirmed).
+                await UninstallApp(app);
+                backup = Directory.Exists(BackupFolder) ? Directory.GetFiles(BackupFolder, "DSA SelfTest App*.reg").OrderByDescending(File.GetLastWriteTime).FirstOrDefault() : null;
                 bool keyGone;
                 using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\DSA SelfTest App")) keyGone = k == null;
-                check(!Directory.Exists(local) && !Directory.Exists(roam) && keyGone && !apps.Contains(app),
-                    "apps: leftovers removed (folders and registry key), the app leaves the list");
+                check(!Directory.Exists(appDir) && !Directory.Exists(local) && !Directory.Exists(roam) && keyGone && !apps.Contains(app),
+                    "apps: after its uninstaller, the remaining 3 items were found again and deleted; the app leaves the list");
                 check(backup != null && File.Exists(backup) && File.ReadAllText(backup, System.Text.Encoding.Unicode).Contains("DSA SelfTest App"),
                     "apps: the registry key was backed up to a .reg file first");
             }
