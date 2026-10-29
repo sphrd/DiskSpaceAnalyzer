@@ -269,7 +269,9 @@ final class ListCell: NSTableCellView {
                 let cx = ListCell.checkX(it)
                 ListCell.drawCheck(NSRect(x: cx, y: ((b.height - 14) / 2).rounded(), width: 14, height: 14), it.check, strong: strong)
                 x = cx + 14 + 6
-            } else if it.groupOf != nil { x += 18 }
+            } else if it.chevron >= 0 { x = ListCell.checkX(it) }          // after the chevron
+            else if let g = it.groupOf, g.chevron >= 0 { x = 42 }            // under an opened head with a chevron
+            else if it.groupOf != nil { x += 18 }
             if !it.isSummary && !it.isGroup {
                 let ir = NSRect(x: x, y: (b.height - 16) / 2, width: 16, height: 16)
                 if it.isDir || it.folderIcon { Theme.drawFolder(ir, strong ? T.BG : T.MUTED) } else { Theme.drawFile(ir, strong ? T.BG : T.MUTED) }
