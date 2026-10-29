@@ -194,7 +194,7 @@ final class ScanBar: NSView {
 /// Text tabs: the current one in accent with an underline pill, the others muted. A tab can have a colour of its own
 /// (colors[i]): its title is drawn in it always, and so is its pill when it is the current one.
 final class TabStrip: NSView {
-    private var titles: [String]
+    private(set) var titles: [String]
     private var rects: [NSRect] = []
     private var hover = -1
     var colors: [Int: NSColor] = [:] { didSet { needsDisplay = true } }
