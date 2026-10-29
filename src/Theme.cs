@@ -29,6 +29,8 @@ namespace DiskSpaceAnalyzer
         public static readonly Color WARN_FG = Hex(0xffd27a);
         public static readonly Color WARN_BG = Hex(0x3d3522);
         public static readonly Color WARN_BORDER = Hex(0x5a4a2a);
+        // Suggestions (space that can be freed): the one place that gets its own hue, so the tab stands out.
+        public static readonly Color SUGGEST = Hex(0x4cc38a);
         public static readonly Color PILL = Hex(0x5c6470);
         public static readonly Color PILL_HOVER = Hex(0x7a828e);
         // Close button hover in the custom title bar: the Windows convention (not a design-language hue).
