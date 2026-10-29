@@ -348,11 +348,15 @@ final class ShotRun {
             if p === w.pSuggest {
                 steps.waitUntil(90) { w.suggestions != nil }
                 steps.then {
-                    // One suggestion opened, with one of its items unchecked (a mixed check), to show the check states.
-                    if let s = w.shownSuggestions.max(by: { $0.targets.count < $1.targets.count }) {
+                    // One suggestion opened (the largest of those with the most items), with one of its items unchecked
+                    // (a mixed check) when it has several, and the smallest suggestion unchecked, to show the check states.
+                    let shown = w.shownSuggestions.sorted { $0.size > $1.size }
+                    let most = shown.map { $0.targets.count }.max() ?? 0
+                    if let s = shown.first(where: { $0.targets.count == most }) {
                         s.expanded = true
                         if s.targets.count > 1 { s.setChecked(s.targets.count - 1, false) }
                     }
+                    if shown.count > 2, let last = shown.last { last.checkAll(false) }
                     w.showSuggestions()
                 }
             }

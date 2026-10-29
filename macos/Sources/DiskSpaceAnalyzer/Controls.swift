@@ -241,12 +241,24 @@ final class ActionBar: NSView {
             }
             if i < rows.count - 1 || rightOwnRow { y += h + gap }
         }
-        x = W
-        for c in rightItems.reversed() {
+        // The right-hand items, right-aligned; on rows of their own they wrap when they do not fit side by side.
+        var rightRows: [[BarItem]] = [[]]
+        var rw: CGFloat = 0
+        for c in rightItems {
             let w = pref(c)
-            x -= w
-            c.frame = NSRect(x: max(0, x), y: y, width: w, height: h)
-            x -= gap
+            if !rightRows[rightRows.count - 1].isEmpty && rw + w > W { rightRows.append([]); rw = 0 }
+            rightRows[rightRows.count - 1].append(c)
+            rw += w + gap
+        }
+        for (i, row) in rightRows.enumerated() {
+            if i > 0 { y += h + gap }
+            x = W
+            for c in row.reversed() {
+                let w = pref(c)
+                x -= w
+                c.frame = NSRect(x: max(0, x), y: y, width: w, height: h)
+                x -= gap
+            }
         }
         let total = y + h + 4
         if total != barHeight { barHeight = total }

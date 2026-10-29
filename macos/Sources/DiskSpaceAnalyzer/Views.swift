@@ -204,8 +204,16 @@ final class ListCell: NSTableCellView {
         if index == 0 {
             var x: CGFloat = 6
             if it.chevron >= 0 {
-                Theme.drawText(it.chevron == 1 ? "▾" : "▸", in: NSRect(x: ListCell.chevronX, y: 0, width: 14, height: b.height),
-                               color: strong ? T.BG : T.MUTED, align: .center)
+                let cx = ListCell.chevronX + 7, cy = (b.height / 2).rounded()
+                let tri = NSBezierPath()
+                if it.chevron == 1 {
+                    tri.move(to: NSPoint(x: cx - 4.5, y: cy - 2.5)); tri.line(to: NSPoint(x: cx + 4.5, y: cy - 2.5)); tri.line(to: NSPoint(x: cx, y: cy + 3))
+                } else {
+                    tri.move(to: NSPoint(x: cx - 2, y: cy - 4.5)); tri.line(to: NSPoint(x: cx + 3.5, y: cy)); tri.line(to: NSPoint(x: cx - 2, y: cy + 4.5))
+                }
+                tri.close()
+                (strong ? T.BG : T.MUTED).setFill()
+                tri.fill()
             }
             if it.check >= 0 {
                 let cx = ListCell.checkX(it)
