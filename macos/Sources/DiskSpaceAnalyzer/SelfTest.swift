@@ -466,6 +466,10 @@ final class SelfTestRun {
                 let kids = w.pApps.items.filter { $0.app === a && $0.groupOf != nil }.count
                 self.check(head?.name == FakeApp.name + "  (uninstalled — leftovers)" && head?.check == 1 && kids == 3,
                            "apps: row \"\(head?.name ?? "none")\" with \(kids) leftover rows")
+                let members = w.pApps.items.filter { $0.app === a && $0.groupOf != nil }
+                self.check(w.pApps.items.first === head && w.pApps.selectedItems.first === head && head?.cells[2] == "" && head?.hideBar == true
+                           && head?.color == T.WARN_FG && members.allSatisfy { $0.color == nil && $0.hideBar && $0.cells[2].isEmpty },
+                           "apps: uninstalled row first and selected, amber, no % (leftover rows normal colour, no %)")
                 let want = "Moved \(FakeApp.name) to the Trash. Found 3 leftovers (\(Fmt.size(a?.leftoverSize ?? -1)))."
                 self.check(w.statusLabel.stringValue == want, "apps: status \"\(w.statusLabel.stringValue)\"")
                 self.check(w.btnRemoveLeftovers.isEnabled, "apps: Remove leftovers enabled")
@@ -656,7 +660,6 @@ final class ShotRun {
                         w.pApps.select(IndexSet(integer: r))
                         w.uninstallSelectedApp { ok in
                             print("apps: fake app uninstalled \(ok), status: \(w.statusLabel.stringValue)")
-                            if let last = w.pApps.items.indices.last { w.pApps.table.scrollRowToVisible(last) }
                             next()
                         }
                     }

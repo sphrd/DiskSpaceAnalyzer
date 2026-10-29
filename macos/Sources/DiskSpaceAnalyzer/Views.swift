@@ -22,6 +22,7 @@ final class ItemInfo {
     var suggestion: Suggestion?        // suggestions: the suggestion of the row (head or one of its targets)
     var app: InstalledApp?             // apps: the app of the row (head or one of its leftovers)
     var leftover: AppLeftover?         // apps: the leftover of a member row
+    var hideBar = false                // no percentage bar (the bar column's cell stays empty)
     var chartSize: Int64 { chartValue >= 0 ? chartValue : size }
     var canDelete: Bool { !isSummary && !isGroup && (isDir || file != nil || targets != nil) }
     var fullPath: String? { isDir ? dir?.fullPath : (file?.fullPath ?? path) }
@@ -279,7 +280,7 @@ final class ListCell: NSTableCellView {
             let textW = Theme.textWidth("100.0 %", Theme.font)
             let bh: CGFloat = 8
             let bar = NSRect(x: 6, y: (b.height - bh) / 2, width: max(0, b.width - textW - 12), height: bh)
-            if bar.width > 8 && !it.isSummary {
+            if bar.width > 8 && !it.isSummary && !it.hideBar {
                 Theme.fillRound(bar, bh / 2, fill: strong ? T.BG : T.BORDER)
                 let w = (bar.width * CGFloat(min(100, max(0, it.percent))) / 100).rounded()
                 if w > 0 { Theme.fillRound(NSRect(x: bar.minX, y: bar.minY, width: max(w, bh), height: bh), bh / 2, fill: strong ? T.FG : T.ACCENT) }
@@ -344,7 +345,7 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var empty = ""
     var onSorted: ((Page) -> Void)?
     var onSelection: ((Page) -> Void)?
-
+    var pinFirst: ((ItemInfo) -> Bool)?    // heads listed before the others whatever the sort order
     init(_ title: String, _ columns: [Column], barColumn: Int, bar: ActionBar?) {
         self.title = title; self.columns = columns; self.barColumn = barColumn; self.bar = bar
         super.init()
@@ -440,7 +441,11 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     /// among themselves.
     func sorted(_ rows: [ItemInfo]) -> [ItemInfo] {
         let key = sortKey, asc = ascending
-        let less: (ItemInfo, ItemInfo) -> Bool = { ItemInfo.compare($0, $1, key, asc) }
+        let pin = pinFirst
+        let less: (ItemInfo, ItemInfo) -> Bool = { a, b in
+            if let p = pin { let pa = p(a), pb = p(b); if pa != pb { return pa } }
+            return ItemInfo.compare(a, b, key, asc)
+        }
         if !rows.contains(where: { $0.groupOf != nil }) { return rows.sorted(by: less) }
         var heads: [ItemInfo] = []
         var members: [ObjectIdentifier: [ItemInfo]] = [:]

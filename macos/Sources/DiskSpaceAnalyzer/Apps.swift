@@ -189,6 +189,8 @@ extension MainWindowController {
         p.chartTitle = "Installed apps"
         p.chartScope = "of apps"
         p.empty = "No apps found."
+        // Apps with leftovers (uninstalled, or after Look for leftovers) come first, then the rest in the sort order.
+        p.pinFirst = { $0.app?.hasLeftovers ?? false }
         p.fill = { [unowned self] in if self.apps == nil { self.loadApps() } else { self.showApps() } }
         p.table.onClickAt = { [unowned self] r, pt in self.appClick(r, pt) }
         return p
@@ -261,7 +263,8 @@ extension MainWindowController {
             it.modified = a.uninstalled ? 0 : Int64(a.installed?.timeIntervalSince1970 ?? 0)
             it.folder = a.path
             it.percent = total > 0 ? 100 * Double(max(0, it.size)) / Double(total) : 0
-            it.cells = [it.name, Fmt.size(it.size), Fmt.pct(it.percent), it.category, it.note, Fmt.date(it.modified), it.folder]
+            it.hideBar = a.uninstalled
+            it.cells = [it.name, Fmt.size(it.size), a.uninstalled ? "" : Fmt.pct(it.percent), it.category, it.note, Fmt.date(it.modified), it.folder]
             it.tip = a.name + "\n" + a.path + (a.bundleId.isEmpty ? "" : "\n" + a.bundleId)
             if a.uninstalled { it.color = T.WARN_FG }
             if a.hasLeftovers {
@@ -282,9 +285,9 @@ extension MainWindowController {
                 c.category = l.note
                 c.folder = l.path
                 c.percent = total > 0 ? 100 * Double(c.size) / Double(total) : 0
-                c.cells = [c.name, l.size < 0 ? "—" : Fmt.size(l.size), l.size < 0 ? "—" : Fmt.pct(c.percent), l.note, "", "", l.path]
+                c.hideBar = true
+                c.cells = [c.name, l.size < 0 ? "—" : Fmt.size(l.size), "", l.note, "", "", l.path]
                 c.tip = c.name + "\n" + l.path + (l.note.isEmpty ? "" : "\n" + l.note)
-                c.color = it.color
                 c.check = l.checked ? 1 : 0
                 rows.append(c)
             }
