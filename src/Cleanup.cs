@@ -127,7 +127,7 @@ namespace DiskSpaceAnalyzer
                     if (((ItemInfo)it.Tag).Name == top) { try { lv.TopItem = it; } catch (Exception) { } break; }
             var ticked = CheckedSuggestionTargets();
             p.Caption.Text = rows.Count == 0 ? "Nothing to suggest." : string.Format(
-                "{0} can probably be freed. Ticked: {1:N0} item{2}, {3}.  White: safe, rebuilt or downloaded again when needed.  Amber: review first.",
+                "{0} can probably be freed. Checked: {1:N0} item{2}, {3}.  White: safe, rebuilt or downloaded again when needed.  Amber: review first.",
                 Fmt.Size(total), ticked.Count, ticked.Count == 1 ? "" : "s", Fmt.Size(ticked.Sum(t => t.Size)));
             p.ChartSub = Fmt.Size(total) + " can be freed";
             p.ChartTotal = 0;
