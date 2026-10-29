@@ -361,6 +361,7 @@ namespace DiskSpaceAnalyzer
                     k.SetValue("DisplayVersion", "1.0");
                     k.SetValue("Publisher", "DSA Test");
                     k.SetValue("InstallLocation", appDir);
+                    k.SetValue("DisplayIcon", "\"" + Application.ExecutablePath + "\",0");
                     k.SetValue("UninstallString", "cmd.exe /c rmdir /s /q \"" + appDir + "\" & reg delete \"HKCU\\" + ukey + "\" /f");
                 }
 
@@ -373,6 +374,8 @@ namespace DiskSpaceAnalyzer
                 check(app != null && app.Version == "1.0" && app.Publisher == "DSA Test" && app.Size >= 50000 && SamePath(app.Location, appDir),
                     "apps: the installed app is listed with version, publisher, size and folder" + (app != null ? " (" + app.Size + " bytes)" : ""));
                 if (app == null) return;
+                check(app.Icon != null && app.Icon.Width == Theme.S(16), "apps: the app's own logo is read from its DisplayIcon" +
+                    (app.Icon != null ? " (" + app.Icon.Width + "x" + app.Icon.Height + ")" : " (none)"));
 
                 // Expanding shows everything that belongs to the app, without changing anything.
                 ExpandApp(app, true);

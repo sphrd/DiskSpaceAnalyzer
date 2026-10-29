@@ -47,6 +47,8 @@ namespace DiskSpaceAnalyzer
         public bool Expandable, Expanded;
         /// <summary>What the row stands for in its view (e.g. a suggestion or one of its targets).</summary>
         public object Data;
+        /// <summary>Picture drawn instead of the folder/file icon (e.g. an app's own logo).</summary>
+        public System.Drawing.Image Icon;
         public DirNode Dir;
         public FileEntry File;
         public List<DeleteTarget> Targets;
@@ -443,7 +445,14 @@ namespace DiskSpaceAnalyzer
                 {
                     var ir = new Rectangle(r.X + pad, r.Y + (r.Height - icon) / 2, icon, icon);
                     Color ic = strong ? Theme.BG : Theme.MUTED;
-                    if (info.IsDir || info.FolderIcon) Theme.DrawFolder(g, ir, ic); else Theme.DrawFile(g, ir, ic);
+                    if (info.Icon != null)
+                    {
+                        var im = g.InterpolationMode;
+                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                        try { g.DrawImage(info.Icon, ir); } catch (Exception) { }
+                        g.InterpolationMode = im;
+                    }
+                    else if (info.IsDir || info.FolderIcon) Theme.DrawFolder(g, ir, ic); else Theme.DrawFile(g, ir, ic);
                 }
                 var tr = new Rectangle(r.X + pad + icon + Theme.S(6), r.Y, Math.Max(0, r.Width - pad - icon - Theme.S(12)), r.Height);
                 TextRenderer.DrawText(g, text, info != null && info.IsGroup ? Theme.FONT_BOLD : Font, tr, fore, CellFlags);

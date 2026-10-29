@@ -21,6 +21,9 @@ namespace DiskSpaceAnalyzer
         public string KeyPath;                  // ...\Uninstall\<KeyName>
         public bool IsMsi, IsStore;
         public string PackageFullName, PackageFamilyName;
+        /// <summary>The DisplayIcon value ("C:\x\app.exe,0" or an .ico); the app's own logo, read in the background.</summary>
+        public string IconSource;
+        public System.Drawing.Image Icon;
         public long Size, EstimatedSize;
         public bool Uninstalled, Expanded;
         /// <summary>Another app with the same program folder (its size is counted there, not here).</summary>
@@ -108,9 +111,11 @@ namespace DiskSpaceAnalyzer
             Task.Factory.StartNew(() =>
             {
                 found = ReadInstalledApps(testMode);
+                int iconPx = Theme.S(16);
                 // Sizes: from the scan when the folder was scanned, otherwise measured now.
                 foreach (var a in found)
                 {
+                    try { a.Icon = LoadAppIcon(a, iconPx); } catch (Exception) { }
                     if (!string.IsNullOrEmpty(a.Location) && Native.IsDirectory(a.Location))
                     {
                         DirNode n = null;
@@ -161,7 +166,7 @@ namespace DiskSpaceAnalyzer
                 var head = new ItemInfo
                 {
                     Data = a, Name = a.Uninstalled ? a.Name + "  (uninstalled -- leftovers)" : a.Name, Size = a.Uninstalled ? leftSize : a.Size,
-                    FolderIcon = true, Path = string.IsNullOrEmpty(a.Location) ? null : a.Location, Folder = a.Location,
+                    FolderIcon = true, Icon = a.Icon, Path = string.IsNullOrEmpty(a.Location) ? null : a.Location, Folder = a.Location,
                     Category = a.Publisher, Note = a.Version, Percent = total > 0 && !a.Uninstalled ? 100.0 * a.Size / total : 0,
                     Expandable = canExpand, Expanded = a.Expanded && hasLeft, Check = a.Uninstalled && hasLeft ? LeftoverState(a) : -1
                 };
@@ -327,6 +332,7 @@ namespace DiskSpaceAnalyzer
             var est = k.GetValue("EstimatedSize");
             if (est is int) a.EstimatedSize = (long)(int)est * 1024;
             a.Location = CleanFolder(Str(k, "InstallLocation"));
+            a.IconSource = Str(k, "DisplayIcon");
             if (a.Location.Length == 0) a.Location = FolderOfExe(Str(k, "DisplayIcon"));
             if (a.Location.Length == 0 && !msi) a.Location = FolderOfExe(un);
             return a;
@@ -419,6 +425,131 @@ namespace DiskSpaceAnalyzer
         }
 
         /// <summary>The Store app's display name from its manifest (falls back to the package name).</summary>
+        // ---------------------------------------------------------------- app logos
+
+        [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "SHDefExtractIconW")]
+        static extern int SHDefExtractIcon(string file, int index, uint flags, out IntPtr large, out IntPtr small, uint size);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool DestroyIcon(IntPtr h);
+
+        /// <summary>The app's own logo at px size: Store apps from their manifest, others from DisplayIcon or the main exe.</summary>
+        static System.Drawing.Image LoadAppIcon(InstalledApp a, int px)
+        {
+            if (a.IsStore) return LoadStoreLogo(a.Location, px);
+            string file = "";
+            int index = 0;
+            string src = (a.IconSource ?? "").Trim();
+            if (src.Length > 0)
+            {
+                src = Environment.ExpandEnvironmentVariables(src);
+                int comma = src.LastIndexOf(',');
+                if (comma > 0 && int.TryParse(src.Substring(comma + 1).Trim(), out index)) src = src.Substring(0, comma);
+                else index = 0;
+                file = src.Trim().Trim('"');
+            }
+            if ((file.Length == 0 || !File.Exists(file)) && a.IsMsi) { file = MsiProductIcon(a.ProductCode); index = 0; }
+            if (string.IsNullOrEmpty(file) || !File.Exists(file)) { file = MainExe(a); index = 0; }
+            if (string.IsNullOrEmpty(file) || !File.Exists(file)) return null;
+            if (file.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return LoadPng(file, px);
+            IntPtr large, small;
+            if (SHDefExtractIcon(file, index, 0, out large, out small, (uint)px) != 0 || large == IntPtr.Zero) return null;
+            try { using (var ic = System.Drawing.Icon.FromHandle(large)) return ic.ToBitmap(); }
+            finally { DestroyIcon(large); if (small != IntPtr.Zero) DestroyIcon(small); }
+        }
+
+        /// <summary>An MSI product's icon file (ARPPRODUCTICON), kept by Windows Installer under its packed product code.</summary>
+        static string MsiProductIcon(string productCode)
+        {
+            string g = (productCode ?? "").Trim('{', '}').Replace("-", "");
+            if (g.Length != 32) return null;
+            Func<string, string> rev = s => new string(s.Reverse().ToArray());
+            var packed = new StringBuilder(rev(g.Substring(0, 8)) + rev(g.Substring(8, 4)) + rev(g.Substring(12, 4)));
+            for (int i = 16; i < 32; i += 2) packed.Append(g[i + 1]).Append(g[i]);
+            try
+            {
+                using (var k = Registry.ClassesRoot.OpenSubKey(@"Installer\Products\" + packed))
+                    return k == null ? null : Environment.ExpandEnvironmentVariables(Str(k, "ProductIcon").Split(',')[0].Trim('"'));
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>The exe in the program folder (or one level below) that most likely is the app: named like the app, else the largest; not its uninstaller or updater.</summary>
+        static string MainExe(InstalledApp a)
+        {
+            if (string.IsNullOrEmpty(a.Location) || !Native.IsDirectory(a.Location)) return null;
+            var exes = new List<string>();
+            try
+            {
+                exes.AddRange(Directory.GetFiles(a.Location, "*.exe"));
+                if (exes.Count == 0)
+                    foreach (var d in Directory.GetDirectories(a.Location).Take(20))
+                        try { exes.AddRange(Directory.GetFiles(d, "*.exe")); } catch (Exception) { }
+            }
+            catch (Exception) { return null; }
+            var bad = new[] { "unins", "uninst", "setup", "update", "crash", "helper", "install", "report", "elevat" };
+            var ok = exes.Where(e => !bad.Any(b => Path.GetFileName(e).IndexOf(b, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
+            if (ok.Count == 0) return null;
+            string key = new string(a.Name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            var named = ok.FirstOrDefault(e =>
+            {
+                string n = new string(Path.GetFileNameWithoutExtension(e).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+                return n.Length > 2 && (key.Contains(n) || n.StartsWith(key));
+            });
+            return named ?? ok.OrderByDescending(e => { try { return new FileInfo(e).Length; } catch (Exception) { return 0L; } }).First();
+        }
+
+        /// <summary>A Store app's logo: Square44x44Logo (or Logo) from AppxManifest.xml, picking the scaled file closest to px.</summary>
+        static System.Drawing.Image LoadStoreLogo(string location, int px)
+        {
+            if (string.IsNullOrEmpty(location)) return null;
+            string m = Path.Combine(location, "AppxManifest.xml");
+            if (!File.Exists(m)) return null;
+            string x = File.ReadAllText(m);
+            string rel = null;
+            var at = System.Text.RegularExpressions.Regex.Match(x, "Square44x44Logo=\"([^\"]+)\"");
+            if (at.Success) rel = at.Groups[1].Value;
+            else
+            {
+                var el = System.Text.RegularExpressions.Regex.Match(x, "<Logo>([^<]+)</Logo>");
+                if (el.Success) rel = el.Groups[1].Value;
+            }
+            if (string.IsNullOrEmpty(rel)) return null;
+            string full = Path.Combine(location, rel.Trim());
+            string dir = Path.GetDirectoryName(full), stem = Path.GetFileNameWithoutExtension(full), ext = Path.GetExtension(full);
+            if (!Directory.Exists(dir)) return null;
+            // Files are e.g. Logo.png, Logo.scale-200.png, Logo.targetsize-32_altform-unplated.png; skip high-contrast ones.
+            var files = Directory.GetFiles(dir, stem + "*" + ext)
+                .Where(f => Path.GetFileName(f).IndexOf("contrast", StringComparison.OrdinalIgnoreCase) < 0 &&
+                            Path.GetFileName(f).IndexOf("lightunplated", StringComparison.OrdinalIgnoreCase) < 0).ToList();
+            if (files.Count == 0) return null;
+            Func<string, int> size = f =>
+            {
+                var t = System.Text.RegularExpressions.Regex.Match(Path.GetFileName(f), @"targetsize-(\d+)");
+                if (t.Success) return int.Parse(t.Groups[1].Value);
+                var s = System.Text.RegularExpressions.Regex.Match(Path.GetFileName(f), @"scale-(\d+)");
+                return s.Success ? 44 * int.Parse(s.Groups[1].Value) / 100 : 44;
+            };
+            // Smallest that is at least px; unplated (transparent background) preferred.
+            string best = files.OrderBy(f => size(f) >= px ? 0 : 1).ThenBy(f => size(f) >= px ? size(f) : -size(f))
+                .ThenBy(f => Path.GetFileName(f).IndexOf("unplated", StringComparison.OrdinalIgnoreCase) >= 0 ? 0 : 1).First();
+            return LoadPng(best, px);
+        }
+
+        static System.Drawing.Image LoadPng(string file, int px)
+        {
+            using (var src = System.Drawing.Image.FromStream(new MemoryStream(File.ReadAllBytes(file))))
+            {
+                var bmp = new System.Drawing.Bitmap(px, px);
+                using (var g = System.Drawing.Graphics.FromImage(bmp))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(src, 0, 0, px, px);
+                }
+                return bmp;
+            }
+        }
+
         static string StoreDisplayName(string location, string fallback)
         {
             try

@@ -55,7 +55,7 @@ open list, and hovering a slice highlights its row and the other way round)
   checked; items to review first start unchecked.
   Suggestions are looked up again whenever the disk changes or you rescan.
 - Hover any row or folder to see its full name and path.
-- **Apps:** every installed app with its real size on disk (Windows: programs and
+- **Apps:** every installed app, with its own logo and its real size on disk (Windows: programs and
   Microsoft Store apps; macOS: apps in Applications). Expand an app to see
   everything that belongs to it: its program folder, settings and caches
   (AppData / ~/Library), shared data, shortcuts and, on Windows, registry keys.

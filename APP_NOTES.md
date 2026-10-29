@@ -145,6 +145,8 @@ patterns (Part 3) are applied through the WinForms mapping below.
   app, after official uninnstaller runs, it should recheck the remainder of files and ask to delete them as well." Confirmed: both
   platforms; macOS: one confirmation, app and all its files to the Trash together.
 
+- 2026-10-29: "show the app logos for the apps found." Both platforms.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -353,6 +355,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   (child rows `<Kind>: <name>`, no checkboxes while installed). Uninstall: official uninstaller, then the same search again; if anything
   remains a dialog lists it and asks `Delete them too?` (Yes = delete with registry backup; No = keep as checkable leftovers).
   macOS: one confirmation moves the bundle and all its items to the Trash. `Look for leftovers` menu item removed.
+- **App logos:** each app row draws the app's own icon (`ItemInfo.Icon`) instead of the folder, loaded with the list in the
+  background at the row icon size. Windows order: `DisplayIcon` (`file,index`, via `SHDefExtractIconW` at the exact size) ->
+  MSI `HKCR\Installer\Products\<packed code>\ProductIcon` -> main exe in the program folder (or one level down; named like the
+  app, else the largest; skips unins/setup/update/helper) -> folder icon. Store apps: `Square44x44Logo` (or `<Logo>`) from
+  AppxManifest.xml, the scaled file closest to the size, unplated preferred, no contrast variants. macOS: `NSWorkspace.icon(forFile:)`.
 - **Gotcha:** `Directory.GetDirectories` on .NET 4 (no 4.6.2 target) rejects `\\?\` paths; the leftover search silently found
   nothing until it used plain paths (these roots are short).
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
