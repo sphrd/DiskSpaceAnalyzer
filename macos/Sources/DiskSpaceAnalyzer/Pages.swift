@@ -6,6 +6,7 @@ extension MainWindowController {
     static let minSizes: [Int64] = [0, 1 << 20, 10 << 20, 100 << 20, 1 << 30]
     static let ageMonths = [0, 3, 6, 12, 24, 60]
     static let maxOwnSlices = 50          // every row of at least 2 % of the total (7.2 degrees) gets a slice of its own
+    static let minOwnSlices = 10          // and always the 10 largest rows (all rows when there are fewer)
     static let minOwnShare = 0.02         // (2 % allows at most 50); smaller rows merge into "smaller items"
 
     var activePage: Page { pages[min(max(0, viewTabs.selectedIndex), pages.count - 1)] }
@@ -109,8 +110,12 @@ extension MainWindowController {
         rowSlice = [:]
         let rows = p.items
         let total = max(Int64(1), total0)
-        let candidates = rows.indices.filter { rows[$0].groupOf == nil && rows[$0].chartSize > 0 && Double(rows[$0].chartSize) >= MainWindowController.minOwnShare * Double(total) }
-        let own = Set(candidates.sorted { rows[$0].chartSize > rows[$1].chartSize }.prefix(MainWindowController.maxOwnSlices))
+        // Own slice: every row of at least 2 % of the total, and at least the 10 largest rows (all rows when there are fewer).
+        let sized = rows.indices.filter { rows[$0].groupOf == nil && rows[$0].chartSize > 0 }
+            .sorted { rows[$0].chartSize > rows[$1].chartSize }
+        let own = Set(sized.enumerated().filter { $0.offset < MainWindowController.minOwnSlices ||
+                Double(rows[$0.element].chartSize) >= MainWindowController.minOwnShare * Double(total) }
+            .map { $0.element }.prefix(MainWindowController.maxOwnSlices))
         var slices: [ChartSlice] = []
         var runs: [ChartSlice] = []
         var headSlice: [ObjectIdentifier: Int] = [:]

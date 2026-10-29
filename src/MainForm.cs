@@ -697,6 +697,7 @@ namespace DiskSpaceAnalyzer
         /// <summary>Folder contents row -> index of the pie slice that contains it.</summary>
         readonly Dictionary<ListViewItem, int> rowSlice = new Dictionary<ListViewItem, int>();
         const int MaxOwnSlices = 50;          // every row of at least 2 % of the total (7.2 degrees) gets a slice of its own
+        const int MinOwnSlices = 10;          // and always the 10 largest rows (all rows when there are fewer)
         const double MinOwnShare = 0.02;      // (2 % allows at most 50); smaller rows merge into "smaller items"
 
         /// <summary>
@@ -710,8 +711,9 @@ namespace DiskSpaceAnalyzer
             var rows = lv.Items.Cast<ListViewItem>().Where(it => it.Tag is ItemInfo).ToList();
             total = Math.Max(1, total);
             var own = new HashSet<ListViewItem>(rows
-                .Where(it => ((ItemInfo)it.Tag).GroupOf == null && ((ItemInfo)it.Tag).ChartSize > 0 && ((ItemInfo)it.Tag).ChartSize >= MinOwnShare * total)
+                .Where(it => ((ItemInfo)it.Tag).GroupOf == null && ((ItemInfo)it.Tag).ChartSize > 0)
                 .OrderByDescending(it => ((ItemInfo)it.Tag).ChartSize)
+                .Where((it, rank) => rank < MinOwnSlices || ((ItemInfo)it.Tag).ChartSize >= MinOwnShare * total)
                 .Take(MaxOwnSlices));
 
             var slices = new List<ChartSlice>();

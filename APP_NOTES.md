@@ -159,6 +159,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   above that should be displayed." Was: 12 largest rows of at least 1.5 %. Confirmed: 2 % (7.2 degrees), no 12-slice cap,
   outer rings unchanged (arcs down to 1.5 degrees).
 
+- 2026-10-29: "ok, as is 2% of the total circle, but put a minimum number of slices. (max is already set) minimum should be 10
+  slices before going to others. except when number of files are less obviously. which then all files should get the slice."
+  (Files view on C: showed one slice + a huge grey arc: only pagefile was over 2 %.) Rule: own slice for every row of at least 2 %
+  AND always the 10 largest rows (all rows when fewer), at most 50.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -182,7 +187,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - Pie chart pane (right, 330 px, fixed) holds only the title (selection + path, or used/total/free for a drive) and the
   donut; the centre shows the hovered slice (name, size, share) or the total. Slices mirror the folder contents list
   exactly, in its current row order (rebuilt after every fill and re-sort): every row of at least 2 % of the total
-  (7.2 degrees; no other cap, so at most 50) gets its own slice (accent shades); runs of consecutive smaller rows merge into one grey "N smaller items"
+  (7.2 degrees), and always the 10 largest rows (all when fewer), gets its own slice (at most 50) (accent shades); runs of consecutive smaller rows merge into one grey "N smaller items"
   slice. A drive root appends "System / not readable" (used - scanned) and "Free space". Free space is an empty
   gap (nothing drawn; a faint `border` fill only while hovered). Slices start at 12 o'clock and run clockwise, so the
   free gap (last) always ends at 12 o'clock, just left of the top vertical line.
