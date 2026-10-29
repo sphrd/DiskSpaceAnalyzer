@@ -332,8 +332,8 @@ namespace DiskSpaceAnalyzer
             {
                 // Tree and chart keep their preferred widths but give way on narrow windows, so the list stays usable.
                 split.SplitterDistance = Math.Min(S(380), split.Width * 26 / 100);
-                // The chart pane is square (as wide as it is tall) for the largest chart; the list keeps at least 380 px.
-                int chartW = Math.Max(S(220), Math.Min(split2.Height, split2.Width - S(380) - split2.SplitterWidth));
+                // The chart pane is 4/5 as wide as it is tall (a large chart, the list keeps more room; at least 380 px).
+                int chartW = Math.Max(S(220), Math.Min(split2.Height * 4 / 5, split2.Width - S(380) - split2.SplitterWidth));
                 split2.SplitterDistance = Math.Max(S(200), split2.Width - chartW - split2.SplitterWidth);
                 LoadDrives();
                 RefreshTree(null);

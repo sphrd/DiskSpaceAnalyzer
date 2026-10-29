@@ -11,8 +11,6 @@ extension MainWindowController {
     var activePage: Page { pages[min(max(0, viewTabs.selectedIndex), pages.count - 1)] }
 
     func buildViews() {
-        // Suggestions is the first tab and the one open at start.
-        pSuggest = buildSuggestionsPage(); pages.append(pSuggest)
 
         pContents = Page("Contents", [Column("name", "Name", 210), Column("size", "Size", 80, true), Column("size", "% of folder", 125, true),
                                       Column("change", "Change", 80, true), Column("files", "Files", 74, true), Column("dirs", "Folders", 66, true),
@@ -20,6 +18,9 @@ extension MainWindowController {
         pContents.followsFolder = true
         pContents.fill = { [unowned self] in if let c = self.current, self.isAttached(c) { self.showContents(c) } }
         pages.append(pContents)
+
+        // Suggestions comes right after Contents (the app opens on Contents).
+        pSuggest = buildSuggestionsPage(); pages.append(pSuggest)
 
         // Files: the whole index under the selected folder, filtered; largest first.
         fileSearch.onChange = { [unowned self] in self.fillFiles() }

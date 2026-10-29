@@ -134,6 +134,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
   middle pane) i still dont see the preview that shows full path and name of the file next to the cursor (or bundled paths for
   suggestions in different dirs)"
 
+- 2026-10-29: "make the chart window a bit smaller by default. make the Contents tab the default tab again. then u can commit and
+  release" (asked: Contents first and opens there, Suggestions second).
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -252,7 +255,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Since v1.7 this is built in: `.\tools\make_demo.ps1 C:\Demo` (sparse files, ~250 MB on disk, a few duplicate pairs),
   `DiskSpaceAnalyzer.exe --cli screenshot <out> C:\Demo --demo` (finds duplicates first, then shows the folder as
   `E:\ Data` with made-up `F:\`/`G:\` drives; skips Suggestions and Changes, which would show this PC), copy
-  `2-contents.png` to `assets\screenshot.png` and `5-duplicates.png` to `assets\screenshot-duplicates.png`, then
+  `1-contents.png` to `assets\screenshot.png` and `5-duplicates.png` to `assets\screenshot-duplicates.png`, then
   `.\tools\make_demo.ps1 C:\Demo -Remove` and delete `%LOCALAPPDATA%\DiskSpaceAnalyzer\history`.
 - Repo logo: `assets/app.png` at the top of the README; `assets/social-preview.png` is the GitHub social preview
   (Settings > General > Social preview; GitHub has no API for it, so it is uploaded by hand).
@@ -305,7 +308,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - **Deletion** goes through `DeleteTarget` (file, folder, folder contents only, Recycle Bin) and `ConfirmAndDelete`;
   afterwards `ApplyDeleted` drops removed nodes and rescans folders that still exist. Contents-only targets skip files in
   use quietly (counted). Recycle uses `SHFileOperation` with ALLOWUNDO + WANTNUKEWARNING.
-- **Default layout:** the chart pane is square (as wide as the panes are tall), the list keeps at least 380 px.
+- **Default layout:** the chart pane is 4/5 as wide as the panes are tall (square in v1.7.2, a bit big), the list keeps at least 380 px.
 - **Suggestions tree:** parent rows (chevron + three-state checkbox) and child rows per target (`ItemInfo.Check`,
   `Expandable`, `Data`; children use `GroupOf` so they share the parent's chart slice). Clicks on the chevron/checkbox are
   caught in `WM_LBUTTONDOWN` before the list selects the row. Safe suggestions start ticked, review-first ones unticked.
@@ -323,10 +326,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
   attached tooltip and sizes it to the row (text cut off). Rows and nodes use `Hover()`: a separate owner-drawn ToolTip shown
   on the form 16/20 px from the cursor 450 ms after the row changes, hidden on leave/click/scroll. Suggestions in several places
   list up to 8 paths. Screenshot mode checks it with the real cursor (`*-hover.png`).
-- **Suggestions tab** is first and the app opens on it; bar = circular-arrow refresh (icon button), Select all, Deselect all,
+- **Suggestions tab** is second (after Contents, which the app opens on; v1.7.3); bar = circular-arrow refresh (icon button), Select all, Deselect all,
   Delete permanently (compact 9 pt buttons); headline `<size> can be freed` 15 pt bold in `SUGGEST`. Clicking a tree folder
   while on Suggestions switches to Contents. **Rescan folder** is a circular-arrow icon button (`RoundButton.Glyph`).
-  Shots are now numbered in tab order: `1-suggestions`, `2-contents`, ... `5-duplicates`.
+  Shots are numbered in tab order: `1-contents`, `2-suggestions`, ... `5-duplicates`.
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
 - **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI
@@ -374,3 +377,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - v1.7.2 (2026-10-29): macOS never downloads iCloud files or folders (dataless items are skipped, materialization off),
   first-run Full Disk Access prompt and no per-folder prompts without it, dmg with a drag-to-Applications arrow; square chart
   pane on both platforms; README rewritten.
+- v1.7.3 (2026-10-29): Suggestions as a checkbox tree (Select all / Deselect all / Delete permanently, green tab, big headline);
+  hover box with full name and path for every row and folder; circular-arrow Rescan; Ctrl/Cmd+D add to delete list,
+  Ctrl/Cmd+Shift+D delete permanently; delete list keeps the real remaining size after a partial delete; suggestions refresh
+  after any change; live updates never drop outside changes; permission buttons hide when granted; chart pane 4/5.

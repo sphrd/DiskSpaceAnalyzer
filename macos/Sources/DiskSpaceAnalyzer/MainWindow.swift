@@ -270,9 +270,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     convenience init() {
         let vf = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        // Wide enough for the tree, a list of about 400 px and a square chart pane as high as the split view.
+        // Wide enough for the tree, a list of about 400 px and a chart pane 4/5 as wide as the split view is high.
         let height = min(760, vf.height * 0.85)
-        let wanted = 2 * 15 + 430 + 2 + 400 + (height - MainWindowController.chromeHeight - 36)
+        let wanted = 2 * 15 + 430 + 2 + 400 + (height - MainWindowController.chromeHeight - 36) * 0.8
         let size = NSSize(width: min(max(1280, wanted), vf.width * 0.92), height: height)
         let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "Disk Space Analyzer"
@@ -412,13 +412,13 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         rightPane.onLayout = { [unowned self] r in
             self.viewTabs.frame = NSRect(x: 0, y: 0, width: r.width, height: 30)
             self.split2.frame = NSRect(x: 0, y: 36, width: r.width, height: max(50, r.height - 36))
-            // Once the tree has its width: the chart pane as wide as it is high (the largest chart), the list gets the rest.
+            // Once the tree has its width: the chart pane 4/5 as wide as it is high, the list gets the rest.
             if self.splitPositioned && !self.split2Positioned && r.width > 400 {
                 self.split2Positioned = true
                 let w = r.width, div = self.split2.dividerThickness
                 // The height without the scan bar (the first scan may have started already).
                 let h = self.root.bounds.height - MainWindowController.chromeHeight - 36
-                let chartW = max(180, min(h, w - MainWindowController.listMinWidth - div))
+                let chartW = max(180, min(h * 0.8, w - MainWindowController.listMinWidth - div))
                 self.split2.setPosition(w - chartW - div, ofDividerAt: 0)
             }
         }

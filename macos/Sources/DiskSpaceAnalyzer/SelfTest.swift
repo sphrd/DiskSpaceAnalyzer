@@ -84,15 +84,16 @@ final class SelfTestRun {
 
     func start() {
         let w = self.w
-        // Start-up: Suggestions is the first tab and open; it finds the suggestions by itself.
+        // Start-up: Contents is the first tab and open, Suggestions second; suggestions are found by themselves.
         steps.then {
-            self.check(w.pages.first === w.pSuggest && w.viewTabs.selectedIndex == 0 && w.activePage === w.pSuggest,
-                       "start: Suggestions is the first tab and the one open")
+            self.check(w.pages.first === w.pContents && w.pages.count > 1 && w.pages[1] === w.pSuggest && w.viewTabs.selectedIndex == 0 && w.activePage === w.pContents,
+                       "start: Contents is the first tab and the one open, Suggestions second")
+            if let i = w.pages.firstIndex(where: { $0 === w.pSuggest }) { w.viewTabs.selectedIndex = i }
         }
         steps.waitUntil(90) { w.suggestions != nil && !w.suggestFinding }
         steps.then {
             self.check(w.suggestions != nil && !w.pSuggest.headline.text.isEmpty == !w.shownSuggestions.isEmpty,
-                       "start: suggestions found without opening the tab (headline \"\(w.pSuggest.headline.text)\")")
+                       "start: suggestions found when the tab is opened (headline \"\(w.pSuggest.headline.text)\")")
             // Picking a folder in the tree (keyboard: Down) while Suggestions is open shows the Contents of that folder.
             w.window?.makeFirstResponder(w.outline)
             if let r = self.root { w.selectDir(r) }
@@ -480,8 +481,10 @@ final class ShotRun {
     func start() {
         let w = app.main!
         let contentsIndex = w.pages.firstIndex { $0 === w.pContents } ?? 1
-        // The app opens on Suggestions.
+        // The app opens on Contents; the first shots show Suggestions.
+        let suggestIndex = w.pages.firstIndex { $0 === w.pSuggest } ?? 1
         steps.waitUntil(90) { w.suggestions != nil && !w.suggestFinding }
+        steps.then { w.viewTabs.selectedIndex = suggestIndex }
         steps.wait(1.5)
         steps.then { self.shot("0-suggestions-start") }
         var saved: [Suggestion]?

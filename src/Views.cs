@@ -83,14 +83,14 @@ namespace DiskSpaceAnalyzer
             pChanges = BuildChangesPage();
             pBasket = BuildBasketPage();
 
-            // Suggestions is the first tab and the one the app opens on.
+            // Contents first (the app opens on it), then Suggestions.
             pages.Remove(pSuggest);
-            pages.Insert(0, pSuggest);
+            pages.Insert(pages.IndexOf(pContents) + 1, pSuggest);
             viewTabs = new TabStrip(pages.Select(p => p.Title).ToArray()) { Dock = DockStyle.Top };
             viewTabs.SelectedIndexChanged += (s, e) => ShowPage();
             viewTabs.SetColor(pages.IndexOf(pSuggest), Theme.SUGGEST);
             foreach (var p in pages) listPanel.Controls.Add(p.Root);
-            pSuggest.Root.Visible = true;
+            pContents.Root.Visible = true;
         }
 
         SizeListView NewList(string[] titles, string[] keys, int[] widths, int barColumn)

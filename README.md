@@ -46,7 +46,7 @@ open list, and hovering a slice highlights its row and the other way round)
   disk images, installers...).
 - **Duplicates:** files with identical content; **Select extra copies** keeps
   the newest of each group.
-- **Suggestions** (the first tab, where the app opens): how much can be freed, in
+- **Suggestions** (the green tab next to Contents): how much can be freed, in
   large print, and what: the Recycle Bin / Trash, temporary files, caches
   (browsers, developer tools, Xcode, Homebrew...), `node_modules` folders, old
   installers in Downloads, and more, each with what deleting it means. Expand a
