@@ -492,6 +492,11 @@ namespace DiskSpaceAnalyzer
 
         public void SetTitle(int i, string text) { titles[i] = text; Invalidate(); }
 
+        readonly Dictionary<int, Color> colors = new Dictionary<int, Color>();
+
+        /// <summary>Gives one tab its own colour (text, and underline when current) instead of muted/accent.</summary>
+        public void SetColor(int i, Color c) { colors[i] = c; Invalidate(); }
+
         void Measure(Graphics g)
         {
             rects = new Rectangle[titles.Length];
@@ -513,13 +518,15 @@ namespace DiskSpaceAnalyzer
             for (int i = 0; i < titles.Length; i++)
             {
                 var r = rects[i];
-                Color c = i == selected ? Theme.ACCENT : i == hover ? Theme.FG : Theme.MUTED;
+                Color own;
+                bool hasOwn = colors.TryGetValue(i, out own);
+                Color c = hasOwn ? (i == hover && i != selected ? Theme.FG : own) : i == selected ? Theme.ACCENT : i == hover ? Theme.FG : Theme.MUTED;
                 TextRenderer.DrawText(g, titles[i], Font, new Rectangle(r.X, r.Y, r.Width, r.Height - Theme.S(4)), c,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
                     TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
                 if (i == selected)
                     Theme.FillRound(g, new Rectangle(r.X + Theme.S(6), r.Bottom - Theme.S(4), r.Width - Theme.S(12), Theme.S(3)),
-                        Theme.S(2), Theme.ACCENT, Theme.ACCENT);
+                        Theme.S(2), hasOwn ? own : Theme.ACCENT, hasOwn ? own : Theme.ACCENT);
             }
         }
 

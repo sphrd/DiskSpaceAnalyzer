@@ -85,6 +85,7 @@ namespace DiskSpaceAnalyzer
 
             viewTabs = new TabStrip(pages.Select(p => p.Title).ToArray()) { Dock = DockStyle.Top };
             viewTabs.SelectedIndexChanged += (s, e) => ShowPage();
+            viewTabs.SetColor(pages.IndexOf(pSuggest), Theme.SUGGEST);
             foreach (var p in pages) listPanel.Controls.Add(p.Root);
             pContents.Root.Visible = true;
         }
@@ -126,7 +127,7 @@ namespace DiskSpaceAnalyzer
 
             list.ColumnClick += (s, e) =>
             {
-                if (list == (pDupes != null ? pDupes.List : null)) return;   // groups keep their order
+                if (list == (pDupes != null ? pDupes.List : null) || list == (pSuggest != null ? pSuggest.List : null)) return;   // groups and trees keep their order
                 list.SortBy(e.Column);
                 if (ActivePage.List == list) RefreshChart();
             };
@@ -158,17 +159,22 @@ namespace DiskSpaceAnalyzer
                 var rows = new List<List<Control>> { new List<Control>() };
                 int x = 0;
                 var leftItems = items.Where(c => c.Visible && !"right".Equals(c.Tag)).ToList();
-                bool oneRow = leftItems.Sum(c => pref(c) + gap) + items.Where(c => c.Visible && "right".Equals(c.Tag)).Sum(c => pref(c) + gap) <= W;
+                var rightItems = items.Where(c => c.Visible && "right".Equals(c.Tag)).ToList();
+                // Right-hand actions that don't fit on one row together flow like the others.
+                bool rightFlows = rightItems.Sum(c => pref(c) + gap) - gap > W;
+                if (rightFlows) leftItems.AddRange(rightItems);
+                bool oneRow = leftItems.Sum(c => pref(c) + gap) + (rightFlows ? 0 : rightItems.Sum(c => pref(c) + gap)) <= W;
                 foreach (var c in leftItems)
                 {
                     // When the bar wraps, a search box gets the first row to itself.
                     if (!oneRow && c is SearchBox && rows[0].Count == 0) { rows[0].Add(c); rows.Add(new List<Control>()); x = 0; continue; }
                     int w = pref(c);
-                    if (rows[rows.Count - 1].Count > 0 && x + w > W) { rows.Add(new List<Control>()); x = 0; }
+                    bool firstRight = rightFlows && c == rightItems[0];   // the right-hand actions start a row of their own
+                    if (rows[rows.Count - 1].Count > 0 && (x + w > W || firstRight)) { rows.Add(new List<Control>()); x = 0; }
                     rows[rows.Count - 1].Add(c);
                     x += w + gap;
                 }
-                var right = items.Where(c => c.Visible && "right".Equals(c.Tag)).ToList();
+                var right = rightFlows ? new List<Control>() : rightItems;
                 int rightW = right.Sum(c => pref(c) + gap) - (right.Count > 0 ? gap : 0);
                 bool rightOwnRow = right.Count > 0 && rows[rows.Count - 1].Count > 0 && x + rightW > W;
                 int y = 0;

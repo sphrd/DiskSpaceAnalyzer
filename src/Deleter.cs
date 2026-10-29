@@ -11,6 +11,8 @@ namespace DiskSpaceAnalyzer
     {
         public string Path = "", Label = "", Note = "";
         public bool IsDir, ContentsOnly, RecycleBin;
+        /// <summary>Ticked in a selection tree (suggestions).</summary>
+        public bool Checked;
         public long Size;
         public DirNode Dir;        // the scanned folder, when known
         public FileEntry File;     // the scanned file, when known

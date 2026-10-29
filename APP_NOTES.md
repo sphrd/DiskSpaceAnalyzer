@@ -117,6 +117,14 @@ patterns (Part 3) are applied through the WinForms mapping below.
   give full disk access ... as the default make the size of the right pane bigger so that it is a square when opened up.
   (maximum chart radius) on the Readme and github page, re-read the whole doc and redo it. everything that was for earlier
   versions should be deleted. "Why" section is pointless ... some mentions of keyboard shortcuts are just for Windows version."
+- 2026-10-29: "after full disk access or run as admin has been done, the button should disappear. I noticed a bug, when i had a
+  large folder in the delete list and deleted it but some files were in use so they didnt delete, in the delete list the size was
+  shown as the initial size, not the one after partial delete. Also change the shortcuts to cmd+D/ctrl+D for add to delte list, and
+  cmd+shift+D/ctrl+shift+D for permanent delete. Also in the suggestion tab, ther is no button to delete all the suggested
+  permanently. there should also be a selector for the suggested files that has also the tree browser with select all deselect
+  all buttons, so that user can customize seletion and delete direvtly form there. also give a disinguishing color to the
+  suggestion tab."
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -289,6 +297,13 @@ patterns (Part 3) are applied through the WinForms mapping below.
   afterwards `ApplyDeleted` drops removed nodes and rescans folders that still exist. Contents-only targets skip files in
   use quietly (counted). Recycle uses `SHFileOperation` with ALLOWUNDO + WANTNUKEWARNING.
 - **Default layout:** the chart pane is square (as wide as the panes are tall), the list keeps at least 380 px.
+- **Suggestions tree:** parent rows (chevron + three-state checkbox) and child rows per target (`ItemInfo.Check`,
+  `Expandable`, `Data`; children use `GroupOf` so they share the parent's chart slice). Clicks on the chevron/checkbox are
+  caught in `WM_LBUTTONDOWN` before the list selects the row. Safe suggestions start ticked, review-first ones unticked.
+  The tab title is green (`Theme.SUGGEST`). Shortcuts: Ctrl+D add to delete list, Ctrl+Shift+D (or Del) delete permanently.
+- **After every delete** `AfterDeleteRemeasure` measures each attempted target (and the same paths in the delete list and
+  suggestions) from the updated scan: gone ones leave, the rest keep the remaining size with `partly deleted -- ...`.
+  (v1.7.2 kept the original size after a partial delete.) **Run as administrator** is hidden when elevated.
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
 - **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI

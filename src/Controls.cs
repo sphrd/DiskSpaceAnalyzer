@@ -41,6 +41,12 @@ namespace DiskSpaceAnalyzer
     internal sealed class ItemInfo
     {
         public bool IsDir, IsSummary, IsGroup, FolderIcon;
+        /// <summary>Checkbox: -1 none, 0 unchecked, 1 checked, 2 mixed (some children checked).</summary>
+        public int Check = -1;
+        /// <summary>Row with children that can be shown or hidden (chevron before the checkbox).</summary>
+        public bool Expandable, Expanded;
+        /// <summary>What the row stands for in its view (e.g. a suggestion or one of its targets).</summary>
+        public object Data;
         public DirNode Dir;
         public FileEntry File;
         public List<DeleteTarget> Targets;
@@ -182,6 +188,7 @@ namespace DiskSpaceAnalyzer
 
         protected override void WndProc(ref Message m)
         {
+            if ((m.Msg == 0x201 || m.Msg == 0x203) && HandleGlyphClick((int)(long)m.LParam)) return;   // WM_LBUTTONDOWN / DBLCLK on a chevron or checkbox
             base.WndProc(ref m);
             switch (m.Msg)
             {
@@ -223,6 +230,82 @@ namespace DiskSpaceAnalyzer
 
         /// <summary>Raised when the mouse moves onto another row (null when it leaves the rows).</summary>
         public event Action<ListViewItem> HotItemChanged;
+
+        // ---- expandable rows with checkboxes (e.g. the suggestions tree)
+
+        /// <summary>Raised when the chevron (false) or the checkbox (true) of a row is clicked.</summary>
+        public event Action<ListViewItem, bool> GlyphClicked;
+
+        const int GlyphW = 16, GlyphGap = 4;
+
+        /// <summary>Left edge of the name column for a row (column order and horizontal scroll included).</summary>
+        int NameLeft(int index)
+        {
+            var row = GetItemRect(index);
+            int x = row.X;
+            var c0 = Columns[0];
+            foreach (ColumnHeader c in Columns) if (c.DisplayIndex < c0.DisplayIndex) x += c.Width;
+            return x;
+        }
+
+        /// <summary>Chevron and checkbox rectangles inside the name cell (empty when the row has none).</summary>
+        public void GlyphRects(ItemInfo info, int cellX, Rectangle row, out Rectangle chevron, out Rectangle check)
+        {
+            chevron = check = Rectangle.Empty;
+            if (info == null || (info.Check < 0 && !info.Expandable)) return;
+            int x = cellX + Theme.S(6) + (info.GroupOf != null ? Theme.S(18) : 0);
+            int s = Theme.S(GlyphW);
+            if (info.GroupOf == null) { chevron = new Rectangle(x, row.Y + (row.Height - s) / 2, s, s); x += s + Theme.S(GlyphGap); }
+            if (info.Check >= 0) check = new Rectangle(x, row.Y + (row.Height - s) / 2, s, s);
+        }
+
+        /// <summary>Width taken by the chevron and checkbox before the icon.</summary>
+        int GlyphSpace(ItemInfo info)
+        {
+            if (info == null || (info.Check < 0 && !info.Expandable)) return 0;
+            int w = info.Check >= 0 ? Theme.S(GlyphW + GlyphGap) : 0;
+            if (info.GroupOf == null) w += Theme.S(GlyphW + GlyphGap);
+            return w;
+        }
+
+        bool HandleGlyphClick(int lParam)
+        {
+            if (GlyphClicked == null) return false;
+            var p = new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF));
+            var it = GetItemAt(Theme.S(4), p.Y);
+            if (it == null) return false;
+            var info = it.Tag as ItemInfo;
+            Rectangle chev, check;
+            GlyphRects(info, NameLeft(it.Index), GetItemRect(it.Index), out chev, out check);
+            chev.Inflate(Theme.S(3), Theme.S(3)); check.Inflate(Theme.S(3), Theme.S(3));
+            if (info != null && info.Expandable && chev.Contains(p)) { GlyphClicked(it, false); return true; }
+            if (info != null && info.Check >= 0 && check.Contains(p)) { GlyphClicked(it, true); return true; }
+            return false;
+        }
+
+        static void DrawCheck(Graphics g, Rectangle r, int state, bool onAccent)
+        {
+            int rad = Theme.S(3);
+            var box = Rectangle.Inflate(r, -Theme.S(1), -Theme.S(1));
+            if (state <= 0)
+            {
+                Color line = onAccent ? Theme.BG : Theme.MUTED;
+                Theme.FillRound(g, box, rad, onAccent ? Theme.ACCENT : Theme.SURFACE, line);
+                Theme.FillRound(g, Rectangle.Inflate(box, -Theme.S(1), -Theme.S(1)), Math.Max(0, rad - 1), onAccent ? Theme.ACCENT : Theme.SURFACE, onAccent ? Theme.ACCENT : Theme.SURFACE);
+                return;
+            }
+            Color fill = onAccent ? Theme.BG : Theme.ACCENT, mark = onAccent ? Theme.ACCENT : Theme.BG;
+            Theme.FillRound(g, box, rad, fill, fill);
+            var sm = g.SmoothingMode;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var pen = new Pen(mark, Math.Max(1.6f, 1.8f * Theme.Scale)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+            {
+                float x = box.X, y = box.Y, w = box.Width, h = box.Height;
+                if (state == 2) g.DrawLine(pen, x + w * 0.28f, y + h * 0.5f, x + w * 0.72f, y + h * 0.5f);
+                else g.DrawLines(pen, new[] { new PointF(x + w * 0.25f, y + h * 0.52f), new PointF(x + w * 0.43f, y + h * 0.70f), new PointF(x + w * 0.76f, y + h * 0.32f) });
+            }
+            g.SmoothingMode = sm;
+        }
 
         /// <summary>Rows linked to the hovered pie slice; scrolls the first one into view if none is visible.</summary>
         public void SetHighlight(IEnumerable<ListViewItem> rows)
@@ -343,6 +426,18 @@ namespace DiskSpaceAnalyzer
             if (col.Index == 0)
             {
                 int icon = Theme.S(16);
+                if (info != null && (info.Check >= 0 || info.Expandable))
+                {
+                    Rectangle chev, check;
+                    GlyphRects(info, r.X, r, out chev, out check);
+                    if (info.Expandable && chev.Width > 0)
+                    {
+                        int cs = Theme.S(10);
+                        Theme.DrawChevron(g, new Rectangle(chev.X + (chev.Width - cs) / 2, chev.Y + (chev.Height - cs) / 2, cs, cs), strong ? Theme.BG : Theme.MUTED, info.Expanded);
+                    }
+                    if (check.Width > 0) DrawCheck(g, check, info.Check, strong);
+                    pad += GlyphSpace(info);
+                }
                 if (info != null && info.GroupOf != null) pad += Theme.S(18);
                 if (info != null && !info.IsSummary && !info.IsGroup)
                 {

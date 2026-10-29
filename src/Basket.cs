@@ -49,7 +49,7 @@ namespace DiskSpaceAnalyzer
                 rows.Add(Row(it, it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %", it.Folder, it.Note));
             }
             rows.Sort((a, b) => p.List.Sorter.Compare(a, b));
-            SetRows(p.List, rows, "The delete list is empty.\nSelect files or folders in any view and press Add to delete list (Insert), then review and delete them here.");
+            SetRows(p.List, rows, "The delete list is empty.\nSelect files or folders in any view and press Add to delete list (Ctrl+D), then review and delete them here.");
             p.Caption.Text = basket.Count == 0 ? "Collect items here from any view, review them, then delete them together."
                 : string.Format("{0:N0} item{1}, {2}.  Move to Recycle Bin can be undone (the space is freed when the bin is emptied); Delete permanently frees it now.",
                     basket.Count, basket.Count == 1 ? "" : "s", Fmt.Size(total));
@@ -124,8 +124,7 @@ namespace DiskSpaceAnalyzer
             var targets = basket.ToList();
             var done = await ConfirmAndDelete(targets, recycle);
             if (done == null) return;
-            basket.RemoveAll(t => t.RecycleBin ? done.Errors.Count == 0 : !Native.Exists(t.Path) || (t.ContentsOnly && done.Errors.Count == 0));
-            BasketChanged();
+            AfterDeleteRemeasure(targets);
         }
 
         void DeleteSelected() { DeleteSelection(false); }
@@ -139,11 +138,7 @@ namespace DiskSpaceAnalyzer
             if (sel.Count == 0) return;
             var targets = sel.SelectMany(DeleteTarget.From).ToList();
             var job = await ConfirmAndDelete(targets, recycle);
-            if (job != null && basket.Count > 0)
-            {
-                basket.RemoveAll(t => !t.RecycleBin && !Native.Exists(t.Path));
-                BasketChanged();
-            }
+            if (job != null) AfterDeleteRemeasure(targets);
         }
 
         /// <summary>Asks, deletes (or recycles) with the busy overlay, then updates the scan. Null when cancelled.</summary>
@@ -213,6 +208,53 @@ namespace DiskSpaceAnalyzer
                     (isAdmin ? "" : " - try Run as administrator") + "):\n\n" + err, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             return job;
+        }
+
+        /// <summary>
+        /// After a delete: every target that was attempted, and every delete-list or suggestion entry for the same path, is
+        /// measured again from the updated scan. Gone (or emptied) targets leave the delete list and the suggestions; targets
+        /// with something left (files in use, access denied) keep the remaining size and say so.
+        /// </summary>
+        void AfterDeleteRemeasure(List<DeleteTarget> attempted)
+        {
+            var all = new List<DeleteTarget>(attempted);
+            all.AddRange(basket);
+            if (suggestions != null) foreach (var s in suggestions) all.AddRange(s.Targets);
+            var gone = new HashSet<DeleteTarget>();
+            foreach (var t in all.Distinct())
+            {
+                bool tried = attempted.Contains(t) || attempted.Any(a => !a.RecycleBin && !t.RecycleBin && SamePath(a.Path, t.Path)) ||
+                    (t.RecycleBin && attempted.Any(a => a.RecycleBin));
+                if (!tried) continue;
+                long? left = MeasureTarget(t);
+                if (left == null || (left.Value == 0 && (t.ContentsOnly || t.RecycleBin || t.IsDir))) { gone.Add(t); continue; }
+                t.Size = left.Value;
+                t.Note = "partly deleted -- the rest is in use or access was denied";
+            }
+            basket.RemoveAll(gone.Contains);
+            if (suggestions != null) foreach (var s in suggestions) { s.Targets.RemoveAll(gone.Contains); s.Remeasure(); }
+            BasketChanged();
+            if (suggestions != null && ActivePage == pSuggest) ShowSuggestions();
+            else if (pSuggest != null) pSuggest.Stale = true;
+        }
+
+        /// <summary>What is left of a target now (null = it no longer exists).</summary>
+        long? MeasureTarget(DeleteTarget t)
+        {
+            if (t.RecycleBin) { long n; return DeleteJob.RecycleBinSize(out n); }
+            if (t.IsDir)
+            {
+                if (!Native.IsDirectory(t.Path)) return null;
+                var n = FindScanned(t.Path, true);
+                if (n != null) return n.Size;
+                try { return new Scanner().Run(t.Path).Size; } catch (Exception) { return 0; }
+            }
+            if (!Native.Exists(t.Path)) return null;
+            var d = FindScanned(Native.ParentDir(t.Path), true);
+            if (d != null && d.FileList != null)
+                for (int i = 0; i < d.FileList.Length; i++)
+                    if (string.Equals(d.FileList[i].Name, Native.FileName(t.Path), StringComparison.OrdinalIgnoreCase)) return FileIndex.Measure(ref d.FileList[i]);
+            return t.Size;
         }
 
         /// <summary>The deepest scanned folder holding path; with exact, only a folder whose path is exactly path.</summary>

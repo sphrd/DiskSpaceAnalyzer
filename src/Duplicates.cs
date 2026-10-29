@@ -271,7 +271,7 @@ namespace DiskSpaceAnalyzer
             lv.EndUpdate();
             lv.Focus();
             lastView = lv;
-            statusLabel.Text = string.Format("Selected {0:N0} extra copies ({1}). Add them to the delete list (Insert) or delete them.",
+            statusLabel.Text = string.Format("Selected {0:N0} extra copies ({1}). Add them to the delete list (Ctrl+D) or delete them.",
                 lv.SelectedItems.Count, Fmt.Size(lv.SelectedItems.Cast<ListViewItem>().Sum(i => ((ItemInfo)i.Tag).Size)));
         }
     }

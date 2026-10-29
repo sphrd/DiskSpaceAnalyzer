@@ -15,6 +15,19 @@ namespace DiskSpaceAnalyzer
         public bool NeedsAdmin;
         public List<DeleteTarget> Targets = new List<DeleteTarget>();
         public long Size;
+        public bool Expanded;
+
+        /// <summary>0 none, 1 all, 2 some of the targets checked.</summary>
+        public int CheckState
+        {
+            get
+            {
+                int n = Targets.Count(t => t.Checked);
+                return n == 0 ? 0 : n == Targets.Count ? 1 : 2;
+            }
+        }
+
+        public void Remeasure() { Size = Targets.Sum(t => t.Size); }
     }
 
     internal sealed partial class MainForm
@@ -22,12 +35,26 @@ namespace DiskSpaceAnalyzer
         int suggestGen;
         List<Suggestion> suggestions;
 
+        RoundButton btnSugAdd, btnSugRecycle, btnSugDelete;
+
         Page BuildSuggestionsPage()
         {
+            var all = Btn("Select all", ButtonKind.Secondary, "Tick every suggestion and every location in it", () => CheckAllSuggestions(true));
+            var none = Btn("Deselect all", ButtonKind.Secondary, "Untick everything", () => CheckAllSuggestions(false));
             var refresh = Btn("Look again", ButtonKind.Secondary, "Measure the suggestions again", () => { suggestions = null; FillSuggestions(); });
+            btnSugAdd = Btn("Add to delete list", ButtonKind.Secondary, "Put the ticked items on the delete list to review them with the rest", AddCheckedSuggestions);
+            btnSugRecycle = Btn("Move to Recycle Bin", ButtonKind.Secondary, "Move the ticked items to the Recycle Bin (can be undone)", () => DeleteCheckedSuggestions(true));
+            btnSugDelete = Btn("Delete permanently", ButtonKind.Warn, "Delete the ticked items now, bypassing the Recycle Bin", () => DeleteCheckedSuggestions(false));
+            foreach (var b in new[] { btnSugAdd, btnSugRecycle, btnSugDelete }) b.Tag = "right";
             var list = NewList(new[] { "Name", "Size", "% of suggestions", "Location", "What deleting means" },
-                new[] { "name", "size", "size", "folder", "note" }, new[] { 230, 90, 150, 300, 420 }, 2);
-            var p = AddPage("Suggestions", list, MakeBar(refresh));
+                new[] { "name", "size", "size", "folder", "note" }, new[] { 260, 90, 150, 300, 420 }, 2);
+            list.GlyphClicked += SuggestionGlyph;
+            list.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Space) { ToggleSelectedSuggestions(); e.Handled = true; }
+                else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.Left) { ExpandSelectedSuggestions(e.KeyCode == Keys.Right); e.Handled = true; }
+            };
+            var p = AddPage("Suggestions", list, MakeBar(all, none, refresh, btnSugAdd, btnSugRecycle, btnSugDelete));
             p.ChartTitle = "Cleanup suggestions";
             p.ChartScope = "of the suggestions";
             p.Empty = "Nothing to suggest.";
@@ -42,6 +69,7 @@ namespace DiskSpaceAnalyzer
             int gen = ++suggestGen;
             p.Caption.Text = "Looking for space that can be freed...";
             SetRows(p.List, new List<ListViewItem>(), "Looking for space that can be freed...");
+            UpdateSuggestionButtons();
             var scanned = roots.Where(r => r.Node != null).Select(r => r.Node).ToList();
             List<Suggestion> found = null;
             Task.Factory.StartNew(() => { found = FindSuggestions(scanned); })
@@ -49,39 +77,135 @@ namespace DiskSpaceAnalyzer
                 {
                     if (gen != suggestGen || IsDisposed) return;
                     suggestions = t.IsFaulted ? new List<Suggestion>() : found;
+                    // Safe suggestions start ticked, "review first" ones unticked.
+                    foreach (var s in suggestions) foreach (var tg in s.Targets) tg.Checked = s.Safe;
                     ShowSuggestions();
                 }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
+        /// <summary>
+        /// The suggestions as a tree: one row per suggestion (chevron, checkbox) and, when expanded, one row per location or
+        /// file it would delete. Children share their suggestion's chart slice. Row order: largest suggestion first.
+        /// </summary>
         void ShowSuggestions()
         {
             var p = pSuggest;
-            // Targets deleted since (e.g. from the delete list) drop out; folders whose contents were cleared are measured again on "Look again".
+            foreach (var s in suggestions) s.Remeasure();
             long total = suggestions.Sum(s => s.Size);
+            var lv = p.List;
+            string top = lv.TopItem != null ? ((ItemInfo)lv.TopItem.Tag).Name : null;
             var rows = new List<ListViewItem>();
-            foreach (var s in suggestions.Where(x => x.Size > 0))
+            foreach (var s in suggestions.Where(x => x.Size > 0).OrderByDescending(x => x.Size))
             {
-                var it = new ItemInfo
+                var head = new ItemInfo
                 {
-                    Targets = s.Targets, Name = s.Name, Size = s.Size, FolderIcon = true, Folder = s.Location,
+                    Targets = s.Targets, Data = s, Name = s.Name, Size = s.Size, FolderIcon = true, Folder = s.Location,
                     Path = s.Targets.Count == 1 && !s.Targets[0].RecycleBin ? s.Targets[0].Path : null,
                     Note = s.Note + (s.NeedsAdmin && !isAdmin ? "  Needs Run as administrator." : ""),
-                    Percent = total > 0 ? 100.0 * s.Size / total : 0
+                    Percent = total > 0 ? 100.0 * s.Size / total : 0, Check = s.CheckState, Expandable = s.Targets.Count > 0, Expanded = s.Expanded
                 };
-                var lvi = Row(it, it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %", it.Folder, it.Note);
+                var lvi = Row(head, head.Name, Fmt.Size(head.Size), head.Percent.ToString("0.0") + " %", head.Folder, head.Note);
                 if (!s.Safe) lvi.ForeColor = Theme.WARN_FG;
                 rows.Add(lvi);
+                if (!s.Expanded) continue;
+                foreach (var tg in s.Targets.Where(x => x.Size > 0).OrderByDescending(x => x.Size))
+                {
+                    var it = new ItemInfo
+                    {
+                        Targets = new List<DeleteTarget> { tg }, Data = tg, GroupOf = head, Name = tg.Label, Size = tg.Size,
+                        FolderIcon = tg.IsDir || tg.RecycleBin, Folder = tg.RecycleBin ? "All drives" : tg.Path, Path = tg.RecycleBin ? null : tg.Path,
+                        Note = tg.ContentsOnly ? "contents only" : tg.Note, Percent = total > 0 ? 100.0 * tg.Size / total : 0, Check = tg.Checked ? 1 : 0
+                    };
+                    var c = Row(it, it.Name, Fmt.Size(it.Size), it.Percent.ToString("0.0") + " %", it.Folder, it.Note);
+                    if (!s.Safe) c.ForeColor = Theme.WARN_FG;
+                    rows.Add(c);
+                }
             }
-            rows.Sort((a, b) => p.List.Sorter.Compare(a, b));
-            SetRows(p.List, rows, "Nothing to suggest: no caches, temporary files or leftovers worth deleting were found.");
+            SetRows(lv, rows, "Nothing to suggest: no caches, temporary files or leftovers worth deleting were found.");
+            if (top != null)
+                foreach (ListViewItem it in lv.Items)
+                    if (((ItemInfo)it.Tag).Name == top) { try { lv.TopItem = it; } catch (Exception) { } break; }
+            var ticked = CheckedSuggestionTargets();
             p.Caption.Text = rows.Count == 0 ? "Nothing to suggest." : string.Format(
-                "{0} can probably be freed. White: safe, rebuilt or downloaded again when needed.  Amber: review first.  Select rows, then Add to delete list.",
-                Fmt.Size(total));
+                "{0} can probably be freed. Ticked: {1:N0} item{2}, {3}.  White: safe, rebuilt or downloaded again when needed.  Amber: review first.",
+                Fmt.Size(total), ticked.Count, ticked.Count == 1 ? "" : "s", Fmt.Size(ticked.Sum(t => t.Size)));
             p.ChartSub = Fmt.Size(total) + " can be freed";
             p.ChartTotal = 0;
+            UpdateSuggestionButtons();
             if (ActivePage == p) RefreshChart();
         }
 
+        List<DeleteTarget> CheckedSuggestionTargets()
+        {
+            if (suggestions == null) return new List<DeleteTarget>();
+            return suggestions.SelectMany(s => s.Targets).Where(t => t.Checked && t.Size > 0).ToList();
+        }
+
+        void UpdateSuggestionButtons()
+        {
+            if (btnSugAdd == null) return;
+            bool any = CheckedSuggestionTargets().Count > 0;
+            btnSugAdd.Enabled = any && !busy;
+            btnSugRecycle.Enabled = btnSugDelete.Enabled = any && !busy && !scanning;
+        }
+
+        void SuggestionGlyph(ListViewItem lvi, bool checkbox)
+        {
+            var info = (ItemInfo)lvi.Tag;
+            var s = info.Data as Suggestion;
+            if (!checkbox) { if (s != null) { s.Expanded = !s.Expanded; ShowSuggestions(); } return; }
+            if (s != null) { bool on = s.CheckState != 1; foreach (var t in s.Targets) t.Checked = on; }
+            else { var t = info.Data as DeleteTarget; if (t != null) t.Checked = !t.Checked; }
+            ShowSuggestions();
+        }
+
+        void ToggleSelectedSuggestions()
+        {
+            var sel = pSuggest.List.SelectedItems.Cast<ListViewItem>().Select(i => (ItemInfo)i.Tag).ToList();
+            if (sel.Count == 0) return;
+            var targets = sel.SelectMany(i => i.Data is Suggestion ? ((Suggestion)i.Data).Targets : i.Data is DeleteTarget ? new List<DeleteTarget> { (DeleteTarget)i.Data } : new List<DeleteTarget>()).Distinct().ToList();
+            bool on = targets.Any(t => !t.Checked);
+            foreach (var t in targets) t.Checked = on;
+            var keep = sel.Select(i => i.Name).ToList();
+            ShowSuggestions();
+            foreach (ListViewItem it in pSuggest.List.Items) it.Selected = keep.Contains(((ItemInfo)it.Tag).Name);
+        }
+
+        void ExpandSelectedSuggestions(bool expand)
+        {
+            var sel = pSuggest.List.SelectedItems.Cast<ListViewItem>().Select(i => (ItemInfo)i.Tag).ToList();
+            var ss = sel.Select(i => i.Data as Suggestion ?? (i.GroupOf != null ? i.GroupOf.Data as Suggestion : null)).Where(x => x != null).Distinct().ToList();
+            if (ss.Count == 0) return;
+            foreach (var s in ss) s.Expanded = expand;
+            ShowSuggestions();
+            foreach (ListViewItem it in pSuggest.List.Items) it.Selected = ss.Contains(((ItemInfo)it.Tag).Data as Suggestion);
+        }
+
+        void CheckAllSuggestions(bool on)
+        {
+            if (suggestions == null) return;
+            foreach (var s in suggestions) foreach (var t in s.Targets) t.Checked = on;
+            ShowSuggestions();
+        }
+
+        void AddCheckedSuggestions()
+        {
+            var ticked = CheckedSuggestionTargets();
+            int added = ticked.Count(AddTarget);
+            BasketChanged();
+            statusLabel.Text = string.Format("Added {0:N0} suggested item{1} to the delete list: now {2:N0} item{3}, {4}.",
+                added, added == 1 ? "" : "s", basket.Count, basket.Count == 1 ? "" : "s", Fmt.Size(basket.Sum(t => t.Size)));
+        }
+
+        async void DeleteCheckedSuggestions(bool recycle)
+        {
+            if (busy || scanning) return;
+            var ticked = CheckedSuggestionTargets();
+            if (ticked.Count == 0) return;
+            var job = await ConfirmAndDelete(ticked, recycle);
+            if (job == null) return;
+            AfterDeleteRemeasure(ticked);
+        }
         // ---------------------------------------------------------------- catalogue
 
         static string Env(string name) { return Environment.GetEnvironmentVariable(name) ?? ""; }

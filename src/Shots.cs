@@ -92,7 +92,13 @@ namespace DiskSpaceAnalyzer
                         FindDuplicates();
                         for (int k = 0; k < 600 && dupeFinder != null; k++) await Task.Delay(200);
                     }
-                    if (p == pSuggest) for (int k = 0; k < 300 && suggestions == null; k++) await Task.Delay(200);
+                    if (p == pSuggest)
+                    {
+                        for (int k = 0; k < 300 && suggestions == null; k++) await Task.Delay(200);
+                        var first = suggestions.Where(x => x.Size > 0 && x.Targets.Count > 1).OrderByDescending(x => x.Size).FirstOrDefault()
+                            ?? suggestions.Where(x => x.Size > 0).OrderByDescending(x => x.Size).FirstOrDefault();
+                        if (first != null) { first.Expanded = true; ShowSuggestions(); }
+                    }
                     await Task.Delay(2000);
                     if (ShotDemo) ClearHover();
                     SaveShot((i + 1) + "-" + p.Title.Split(' ')[0].ToLowerInvariant());
@@ -217,6 +223,37 @@ namespace DiskSpaceAnalyzer
                 // History: the scan was saved for comparison.
                 for (int i = 0; i < 20 && History.Load(dir, out _when) == null; i++) await Task.Delay(250);
                 check(History.Load(dir, out _when) != null, "history: scan saved for the Changes view");
+
+                // Partial delete: a file in use stays; the delete list keeps the folder with what is left (bug in v1.7.2).
+                File.WriteAllBytes(P(@"E\x.bin"), new byte[30000]);
+                for (int i = 0; i < 40 && (FindScanned(P("E"), true) == null || FindScanned(P("E"), true).LocalFiles != 1); i++) await Task.Delay(250);
+                var eNode = FindScanned(P("E"), true);
+                basket.Clear();
+                AddTarget(new DeleteTarget { Path = eNode.FullPath, Label = "E", IsDir = true, Dir = eNode, Size = 37000 });   // x.bin + e.txt
+                using (new FileStream(P(@"E\deep\e.txt"), FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    await ConfirmAndDelete(basket.ToList(), false);
+                    AfterDeleteRemeasure(basket.ToList());
+                }
+                check(basket.Count == 1 && basket[0].Size == 7000 && basket[0].Note.StartsWith("partly deleted") && !File.Exists(P(@"E\x.bin")),
+                    "delete list: after a partial delete the entry shows what is left (" + (basket.Count > 0 ? basket[0].Size + " bytes, note: " + basket[0].Note : "none") + ", x.bin " + (File.Exists(P(@"E\x.bin")) ? "still there" : "gone") + ")");
+                basket.Clear();
+                BasketChanged();
+
+                // Suggestions: tick boxes, mixed state, select all / deselect all.
+                var saved = suggestions;
+                var sg = new Suggestion { Name = "Test cache", Safe = true, Note = "test" };
+                sg.Targets.Add(new DeleteTarget { Path = P("one"), Label = "one", IsDir = true, Size = 100 });
+                sg.Targets.Add(new DeleteTarget { Path = P("two"), Label = "two", IsDir = true, Size = 200 });
+                suggestions = new List<Suggestion> { sg };
+                CheckAllSuggestions(false);
+                bool none0 = sg.CheckState == 0 && CheckedSuggestionTargets().Count == 0;
+                sg.Targets[1].Checked = true;
+                bool mixed = sg.CheckState == 2 && CheckedSuggestionTargets().Sum(x => x.Size) == 200;
+                CheckAllSuggestions(true);
+                bool all1 = sg.CheckState == 1 && CheckedSuggestionTargets().Count == 2;
+                check(none0 && mixed && all1, "suggestions: deselect all, one ticked = mixed, select all");
+                suggestions = saved;
             }
             catch (Exception ex) { check(false, "exception: " + ex); }
             try { File.WriteAllText(dir + ".log", log.ToString()); } catch (Exception) { }

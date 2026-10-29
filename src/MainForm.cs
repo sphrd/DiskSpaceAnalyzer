@@ -105,8 +105,8 @@ namespace DiskSpaceAnalyzer
             btnUp = Btn("Up", ButtonKind.Secondary, "Go to the parent folder (Backspace)", GoUp);
             btnRescan = Btn("Rescan folder", ButtonKind.Secondary, "Rescan the selected folder (F5)", RescanSelected);
             btnExplorer = Btn("Show in Explorer", ButtonKind.Secondary, "Open the selected item in Windows Explorer", ShowInExplorer);
-            btnAddList = Btn("Add to delete list", ButtonKind.Secondary, "Collect the selected items in the delete list; review them there, then delete them together (Insert)", AddSelectionToBasket);
-            btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Del)", DeleteSelected);
+            btnAddList = Btn("Add to delete list", ButtonKind.Secondary, "Collect the selected items in the delete list; review them there, then delete them together (Ctrl+D)", AddSelectionToBasket);
+            btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Ctrl+Shift+D)", DeleteSelected);
             btnExport = Btn("Export...", ButtonKind.Secondary, "Save the scan as a CSV file or an HTML report", ExportScan);
 
 
@@ -129,9 +129,9 @@ namespace DiskSpaceAnalyzer
             miExplorer = new ToolStripMenuItem("Show in Explorer", null, (s, e) => ShowInExplorer());
             miCopy = new ToolStripMenuItem("Copy path", null, (s, e) => CopyPath());
             miRescan = new ToolStripMenuItem("Rescan folder", null, (s, e) => RescanSelected()) { ShortcutKeyDisplayString = "F5" };
-            miAddList = new ToolStripMenuItem("Add to delete list", null, (s, e) => AddSelectionToBasket()) { ShortcutKeyDisplayString = "Ins" };
+            miAddList = new ToolStripMenuItem("Add to delete list", null, (s, e) => AddSelectionToBasket()) { ShortcutKeyDisplayString = "Ctrl+D" };
             miRecycle = new ToolStripMenuItem("Move to Recycle Bin...", null, (s, e) => RecycleSelected());
-            miDelete = new ToolStripMenuItem("Delete permanently...", null, (s, e) => DeleteSelected()) { ShortcutKeyDisplayString = "Del" };
+            miDelete = new ToolStripMenuItem("Delete permanently...", null, (s, e) => DeleteSelected()) { ShortcutKeyDisplayString = "Ctrl+Shift+D" };
             menu.Items.AddRange(new ToolStripItem[] { miOpen, miExplorer, miCopy, miRescan, new ToolStripSeparator(), miAddList, miRecycle, miDelete });
             foreach (ToolStripItem it in menu.Items) it.ForeColor = Theme.FG;
             miDelete.ForeColor = Theme.WARN_FG;
@@ -418,7 +418,8 @@ namespace DiskSpaceAnalyzer
             base.OnKeyDown(e);
             if (e.KeyCode == Keys.F1) { ShowAbout(); e.Handled = true; return; }
             if (pathBox.Box.Focused) return;
-            if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
+            if (e.KeyCode == Keys.Delete || (e.KeyCode == Keys.D && e.Control && e.Shift)) { DeleteSelected(); e.Handled = true; }
+            else if (e.KeyCode == Keys.D && e.Control) { AddSelectionToBasket(); e.Handled = true; }
             else if (e.KeyCode == Keys.F5) { RescanSelected(); e.Handled = true; }
             else if (e.KeyCode == Keys.Back) { GoUp(); e.Handled = true; }
             else if (e.KeyCode == Keys.Enter && lastView == tree && tree.SelectedNode != null && tree.SelectedNode.Tag is ScanRoot)
@@ -819,6 +820,7 @@ namespace DiskSpaceAnalyzer
             btnExport.Enabled = !busy && root != null;
             measure.Enabled = !busy;
             if (btnBasketRecycle != null) btnBasketRecycle.Enabled = btnBasketDelete.Enabled = idle && basket.Count > 0;
+            UpdateSuggestionButtons();
         }
 
         void UpdateProgress()
