@@ -5,8 +5,8 @@ import AppKit
 extension MainWindowController {
     static let minSizes: [Int64] = [0, 1 << 20, 10 << 20, 100 << 20, 1 << 30]
     static let ageMonths = [0, 3, 6, 12, 24, 60]
-    static let maxOwnSlices = 12          // at most this many rows get a slice of their own...
-    static let minOwnShare = 0.015        // ...and only if they hold at least 1.5 % of the total
+    static let maxOwnSlices = 50          // every row of at least 2 % of the total (7.2 degrees) gets a slice of its own
+    static let minOwnShare = 0.02         // (2 % allows at most 50); smaller rows merge into "smaller items"
 
     var activePage: Page { pages[min(max(0, viewTabs.selectedIndex), pages.count - 1)] }
 

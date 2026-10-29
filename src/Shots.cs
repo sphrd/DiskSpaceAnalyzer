@@ -191,6 +191,24 @@ namespace DiskSpaceAnalyzer
                 check(chart.Morphs == 1 && chart.MorphFrames >= 8, "chart: the logo turned into the chart after the scan (" + chart.MorphFrames + " frames)");
                 check(top != null && top.Files == 9 && top.Dirs == 8, string.Format("scan: {0} files, {1} folders (expected 9, 8)", top != null ? top.Files : -1, top != null ? top.Dirs : -1));
 
+                // Chart: every row of at least 2 % of the total (7.2 degrees) has a slice of its own, smaller rows join "smaller items".
+                {
+                    var sl = BuildSlices(contents, top.Size, "of folder");
+                    var bad = new List<string>();
+                    int ownCount = 0;
+                    foreach (ListViewItem r in contents.Items)
+                    {
+                        var ri = (ItemInfo)r.Tag;
+                        var s = sl.FirstOrDefault(x => x.Rows.Contains(r));
+                        bool own = s != null && s.Color != Theme.CHART_OTHER;
+                        if (own) ownCount++;
+                        if (own != (ri.ChartSize > 0 && ri.ChartSize >= 0.02 * top.Size)) bad.Add(ri.Name);
+                    }
+                    check(bad.Count == 0 && ownCount > 0, "chart: rows of 2 % or more get their own slice (" + ownCount + " of " + contents.Items.Count + ")" +
+                        (bad.Count > 0 ? "; wrong: " + string.Join(", ", bad) : ""));
+                    UpdateChart(top);
+                }
+
                 // Live updates: a new file and a new folder appear without a rescan.
                 File.WriteAllBytes(P(@"A\new.txt"), new byte[5000]);
                 Directory.CreateDirectory(P(@"E\deep"));

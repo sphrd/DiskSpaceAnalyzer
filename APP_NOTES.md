@@ -154,6 +154,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   never moves a row); every app has an arrow; `Looking for its files and settings...` / `No files or settings found.` child line;
   double-click on an app row opens/closes it; scroll position kept by row identity.
 
+- 2026-10-29: "for the pie chart what is the current limit to display the file/folders or to put them in others? make a new rule
+  that the size limit that makes them appear as others to be 5% of the current total circle, meaning 7.2 degrees of the circle.
+  above that should be displayed." Was: 12 largest rows of at least 1.5 %. Confirmed: 2 % (7.2 degrees), no 12-slice cap,
+  outer rings unchanged (arcs down to 1.5 degrees).
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -176,8 +181,8 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - Tree `% of parent` column has a 44 px pill bar; for a scanned drive root it is the share of the drive capacity.
 - Pie chart pane (right, 330 px, fixed) holds only the title (selection + path, or used/total/free for a drive) and the
   donut; the centre shows the hovered slice (name, size, share) or the total. Slices mirror the folder contents list
-  exactly, in its current row order (rebuilt after every fill and re-sort): up to 12 rows of at least 1.5 % of the
-  folder get their own slice (accent shades); runs of consecutive smaller rows merge into one grey "N smaller items"
+  exactly, in its current row order (rebuilt after every fill and re-sort): every row of at least 2 % of the total
+  (7.2 degrees; no other cap, so at most 50) gets its own slice (accent shades); runs of consecutive smaller rows merge into one grey "N smaller items"
   slice. A drive root appends "System / not readable" (used - scanned) and "Free space". Free space is an empty
   gap (nothing drawn; a faint `border` fill only while hovered). Slices start at 12 o'clock and run clockwise, so the
   free gap (last) always ends at 12 o'clock, just left of the top vertical line.

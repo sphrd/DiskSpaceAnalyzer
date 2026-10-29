@@ -696,8 +696,8 @@ namespace DiskSpaceAnalyzer
 
         /// <summary>Folder contents row -> index of the pie slice that contains it.</summary>
         readonly Dictionary<ListViewItem, int> rowSlice = new Dictionary<ListViewItem, int>();
-        const int MaxOwnSlices = 12;          // at most this many rows get a slice of their own...
-        const double MinOwnShare = 0.015;     // ...and only if they hold at least 1.5 % of the folder
+        const int MaxOwnSlices = 50;          // every row of at least 2 % of the total (7.2 degrees) gets a slice of its own
+        const double MinOwnShare = 0.02;      // (2 % allows at most 50); smaller rows merge into "smaller items"
 
         /// <summary>
         /// Slices for a list exactly as displayed: one slice per row in row order, except that runs of consecutive small
