@@ -38,6 +38,7 @@ final class DeleteJob {
     private let lock = NSLock()
     private var _current = "", _files: Int64 = 0, _recycled: Int64 = 0, _skipped: Int64 = 0
     private var _errors: [String] = []
+    private var _failed: [String] = []
     private var quiet = false
 
     var current: String { get { lock.lock(); defer { lock.unlock() }; return _current } set { lock.lock(); _current = newValue; lock.unlock() } }
@@ -45,6 +46,8 @@ final class DeleteJob {
     var recycled: Int64 { lock.lock(); defer { lock.unlock() }; return _recycled }
     var skipped: Int64 { lock.lock(); defer { lock.unlock() }; return _skipped }
     var errors: [String] { lock.lock(); defer { lock.unlock() }; return _errors }
+    /// Items that stayed (in use, protected, no permission), skipped ones included; not the folders that held them.
+    var failedPaths: [String] { lock.lock(); defer { lock.unlock() }; return _failed }
 
     func run(_ targets: [DeleteTarget], trash: Bool) {
         for t in targets {
@@ -70,6 +73,7 @@ final class DeleteJob {
                 try FileManager.default.trashItem(at: URL(fileURLWithPath: p), resultingItemURL: nil)
                 lock.lock(); _recycled += 1; lock.unlock()
             } catch {
+                lock.lock(); _failed.append(p); lock.unlock()
                 if quiet { lock.lock(); _skipped += 1; lock.unlock() }
                 else { lock.lock(); _errors.append(p + "  -  could not be moved to the Trash (" + error.localizedDescription + ")"); lock.unlock() }
             }
@@ -119,6 +123,7 @@ final class DeleteJob {
 
     private func error(_ path: String, _ code: Int32) {
         lock.lock(); defer { lock.unlock() }
+        if code != ENOTEMPTY { _failed.append(path) }
         if quiet { _skipped += 1; return }
         _errors.append(path + "  -  " + String(cString: strerror(code)))
     }

@@ -1,24 +1,58 @@
 import AppKit
 
-/// A known place that usually holds space that can be freed, with what deleting it means.
+/// A known place that usually holds space that can be freed, with what deleting it means. Its targets (each folder,
+/// cache or file) can be checked one by one in the Suggestions view.
 final class Suggestion {
     var name = "", note = "", location = ""
     var safe = true                       // safe = rebuilt or downloaded again automatically
     var targets: [DeleteTarget] = []
+    var checked: [Bool] = []              // per target: picked in the Suggestions view
+    var expanded = false
     var size: Int64 = 0
     init(_ name: String, safe: Bool, note: String) { self.name = name; self.safe = safe; self.note = note }
+
+    func isChecked(_ i: Int) -> Bool { i >= 0 && i < checked.count && checked[i] }
+
+    /// 0 = nothing checked, 1 = every target checked, 2 = some (mixed).
+    var checkState: Int {
+        let n = targets.indices.filter { isChecked($0) }.count
+        return n == 0 ? 0 : n == targets.count ? 1 : 2
+    }
+
+    func checkAll(_ on: Bool) { checked = Array(repeating: on, count: targets.count) }
+
+    func setChecked(_ i: Int, _ on: Bool) {
+        if checked.count != targets.count { checked = targets.indices.map { isChecked($0) } }
+        if i >= 0 && i < checked.count { checked[i] = on }
+    }
+
+    func index(of t: DeleteTarget) -> Int? { targets.firstIndex { $0 === t } }
+
+    var checkedTargets: [DeleteTarget] { targets.indices.filter { isChecked($0) }.map { targets[$0] } }
+
+    /// Safe suggestions start checked, the ones to review first unchecked.
+    static func resetChecks(_ list: [Suggestion]) { for s in list { s.checkAll(s.safe) } }
+    static func checkAll(_ list: [Suggestion], _ on: Bool) { for s in list { s.checkAll(on) } }
+    static func checked(_ list: [Suggestion]) -> [DeleteTarget] { list.flatMap { $0.checkedTargets } }
 }
 
 extension MainWindowController {
     func buildSuggestionsPage() -> Page {
         btnLookAgain.tip = "Measure the suggestions again"
-        let p = Page("Suggestions", [Column("name", "Name", 190), Column("size", "Size", 80, true), Column("size", "% of suggestions", 135, true),
+        btnSugAll.tip = "Check every suggested item"
+        btnSugNone.tip = "Uncheck every suggested item"
+        btnSugAdd.tip = "Add the checked items to the delete list, to review and delete them there"
+        btnSugTrash.tip = "Move the checked items to the Trash (caches: their contents; the Trash item empties the Trash)"
+        btnSugDelete.tip = "Delete the checked items now, bypassing the Trash (caches: their contents)"
+        let p = Page("Suggestions", [Column("name", "Name", 230), Column("size", "Size", 80, true), Column("size", "% of suggestions", 135, true),
                                      Column("folder", "Location", 280), Column("note", "What deleting means", 420)],
-                     barColumn: 2, bar: ActionBar([btnLookAgain]))
+                     barColumn: 2, bar: ActionBar([btnSugAll, btnSugNone, btnLookAgain, btnSugAdd, btnSugTrash, btnSugDelete],
+                                                  right: [btnSugAdd, btnSugTrash, btnSugDelete]))
         p.chartTitle = "Cleanup suggestions"
         p.chartScope = "of the suggestions"
         p.empty = "Nothing to suggest."
         p.fill = { [unowned self] in self.fillSuggestions() }
+        p.table.onClickAt = { [unowned self] r, pt in self.suggestClick(r, pt) }
         return p
     }
 
@@ -29,35 +63,175 @@ extension MainWindowController {
         let gen = suggestGen
         p.setCaption("Looking for space that can be freed...")
         p.setRows([], "Looking for space that can be freed...")
+        updateButtons()
         let scanned = roots.compactMap { $0.node }
         readInBackground({ [unowned self] in self.findSuggestions(scanned) }, { [weak self] found in
             guard let self = self, gen == self.suggestGen else { return }
+            Suggestion.resetChecks(found)
             self.suggestions = found
             self.showSuggestions()
         })
     }
 
+    /// The suggestions shown in the view.
+    var shownSuggestions: [Suggestion] { (suggestions ?? []).filter { $0.size > 0 && !$0.targets.isEmpty } }
+
+    /// A row of the Suggestions view: a suggestion (head) with a chevron and a checkbox, and when it is expanded one row
+    /// per target under it (sharing its chart slice), each with its own checkbox.
     func showSuggestions() {
         let p = pSuggest!
-        let list = suggestions ?? []
+        let list = shownSuggestions
         let total = list.reduce(Int64(0)) { $0 + $1.size }
+        let keep = Set(p.selectedItems.compactMap { suggestKey($0) })
         var rows: [ItemInfo] = []
-        for s in list where s.size > 0 {
+        for s in list {
             let it = ItemInfo()
+            it.suggestion = s
             it.targets = s.targets; it.name = s.name; it.size = s.size; it.folderIcon = true; it.folder = s.location
             it.path = s.targets.count == 1 && !s.targets[0].emptyTrash ? s.targets[0].path : nil
             it.note = s.note
             it.percent = total > 0 ? 100 * Double(s.size) / Double(total) : 0
             it.cells = [it.name, Fmt.size(it.size), Fmt.pct(it.percent), it.folder, it.note]
             if !s.safe { it.color = T.WARN_FG }
+            it.chevron = s.expanded ? 1 : 0
+            it.check = s.checkState
             rows.append(it)
+            if !s.expanded { continue }
+            for (i, t) in s.targets.enumerated() {
+                let c = ItemInfo()
+                c.suggestion = s
+                c.groupOf = it
+                c.targets = [t]; c.name = t.label; c.size = t.size; c.folderIcon = t.isDir
+                c.path = t.emptyTrash ? nil : t.path
+                c.folder = t.path
+                c.note = t.note.hasPrefix("partly deleted") ? t.note : ""
+                c.percent = total > 0 ? 100 * Double(t.size) / Double(total) : 0
+                c.cells = [c.name, Fmt.size(c.size), Fmt.pct(c.percent), c.folder, c.note]
+                c.color = it.color
+                c.check = s.isChecked(i) ? 1 : 0
+                rows.append(c)
+            }
         }
         p.setRows(rows, "Nothing to suggest: no caches, logs or leftovers worth deleting were found.")
-        p.setCaption(rows.isEmpty ? "Nothing to suggest." :
-            "\(Fmt.size(total)) can probably be freed. White: safe, rebuilt or downloaded again when needed.  Amber: review first.  Select rows, then Add to delete list.")
+        if !keep.isEmpty {
+            var sel = IndexSet()
+            for (i, it) in p.items.enumerated() {
+                if let k = suggestKey(it), keep.contains(k) { sel.insert(i) }
+                else if it.groupOf == nil, let s = it.suggestion, !s.expanded, s.targets.contains(where: { keep.contains(ObjectIdentifier($0)) }) { sel.insert(i) }
+            }
+            p.select(sel)
+        }
+        updateSuggestCaption()
         p.chartSub = Fmt.size(total) + " can be freed"
         p.chartTotal = 0
+        updateButtons()
         if activePage === p { refreshChart() }
+    }
+
+    /// Identity of a row across refills: its target (member rows) or its suggestion (heads).
+    private func suggestKey(_ it: ItemInfo) -> ObjectIdentifier? {
+        guard let s = it.suggestion else { return nil }
+        if it.groupOf != nil, let t = it.targets?.first { return ObjectIdentifier(t) }
+        return ObjectIdentifier(s)
+    }
+
+    func updateSuggestCaption() {
+        let list = shownSuggestions
+        let total = list.reduce(Int64(0)) { $0 + $1.size }
+        let checked = Suggestion.checked(list)
+        let size = checked.reduce(Int64(0)) { $0 + $1.size }
+        pSuggest.setCaption(list.isEmpty ? "Nothing to suggest." :
+            "\(Fmt.size(total)) can probably be freed. Checked: \(Fmt.count(checked.count)) item\(checked.count == 1 ? "" : "s"), \(Fmt.size(size)).  White: safe, rebuilt or downloaded again when needed.  Amber: review first.")
+    }
+
+    /// The check marks changed: rows, caption and buttons follow (the row selection stays).
+    func suggestChecksChanged() {
+        for it in pSuggest.items {
+            guard let s = it.suggestion else { continue }
+            if it.groupOf == nil { it.check = s.checkState }
+            else if let t = it.targets?.first, let i = s.index(of: t) { it.check = s.isChecked(i) ? 1 : 0 }
+        }
+        pSuggest.table.redrawCells()
+        updateSuggestCaption()
+        updateButtons()
+    }
+
+    func checkAllSuggestions(_ on: Bool) {
+        Suggestion.checkAll(shownSuggestions, on)
+        suggestChecksChanged()
+    }
+
+    /// Toggles rows: a head checks or unchecks all its targets; when any of the rows is not fully checked, all get checked.
+    func toggleSuggestChecks(_ rows: [ItemInfo]) {
+        let rows = rows.filter { $0.suggestion != nil }
+        if rows.isEmpty { return }
+        let on = rows.contains { $0.check != 1 }
+        for it in rows {
+            guard let s = it.suggestion else { continue }
+            if it.groupOf == nil { s.checkAll(on) }
+            else if let t = it.targets?.first, let i = s.index(of: t) { s.setChecked(i, on) }
+        }
+        suggestChecksChanged()
+    }
+
+    /// Expands or collapses the suggestions of the rows (nil = toggle).
+    func expandSuggestions(_ rows: [ItemInfo], _ open: Bool?) {
+        var changed = false
+        for it in rows {
+            guard let s = it.suggestion else { continue }
+            let to = open ?? !s.expanded
+            if s.expanded != to { s.expanded = to; changed = true }
+        }
+        if changed { showSuggestions() }
+    }
+
+    /// Clicks on a chevron or a checkbox in the name column; the row selection does not change.
+    func suggestClick(_ row: Int, _ pt: NSPoint) -> Bool {
+        let p = pSuggest!
+        guard row < p.items.count, p.items[row].suggestion != nil,
+              let ci = p.table.tableColumns.firstIndex(where: { $0.identifier.rawValue == "c0" }) else { return false }
+        let it = p.items[row]
+        let x = pt.x - p.table.rect(ofColumn: ci).minX
+        if it.chevron >= 0 && x >= ListCell.chevronX - 3 && x < ListCell.chevronX + 17 { expandSuggestions([it], nil); return true }
+        let cx = ListCell.checkX(it)
+        if it.check >= 0 && x >= cx - 4 && x < cx + 18 { toggleSuggestChecks([it]); return true }
+        return false
+    }
+
+    /// Space toggles the checks of the selected rows, Left / Right collapse / expand them.
+    func suggestKeyDown(_ e: NSEvent) -> Bool {
+        if e.modifierFlags.contains(.command) || e.modifierFlags.contains(.option) || e.modifierFlags.contains(.control) { return false }
+        let sel = pSuggest.selectedItems
+        if sel.isEmpty { return false }
+        switch e.keyCode {
+        case 49: toggleSuggestChecks(sel); return true
+        case 123: expandSuggestions(sel, false); return true
+        case 124: expandSuggestions(sel, true); return true
+        default: return false
+        }
+    }
+
+    func addCheckedSuggestions() {
+        if busy { return }
+        let targets = Suggestion.checked(shownSuggestions)
+        if targets.isEmpty { return }
+        var added = 0
+        for t in targets where addTarget(t) { added += 1 }
+        basketChanged()
+        let total = basket.reduce(Int64(0)) { $0 + $1.size }
+        statusLabel.stringValue = added == 0 ? "Already on the delete list."
+            : "Added \(Fmt.count(added)) item\(added == 1 ? "" : "s") to the delete list: now \(Fmt.count(basket.count)) item\(basket.count == 1 ? "" : "s"), \(Fmt.size(total))."
+    }
+
+    /// Deletes (or moves to the Trash) the checked targets, not the selected rows.
+    func deleteCheckedSuggestions(trash: Bool) {
+        if busy || scanning { return }
+        let targets = Suggestion.checked(shownSuggestions)
+        if targets.isEmpty { return }
+        confirmAndDelete(targets, trash: trash) { [weak self] job in
+            guard let self = self, job != nil else { return }
+            self.basketChanged()
+        }
     }
 
     // MARK: catalogue (runs on a background thread while the trees are held still)

@@ -207,6 +207,11 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var onDupesFinished: (() -> Void)?
     // Suggestions view
     lazy var btnLookAgain = RoundButton("Look again", .secondary) { [unowned self] in self.suggestions = nil; self.fillSuggestions() }
+    lazy var btnSugAll = RoundButton("Select all", .secondary) { [unowned self] in self.checkAllSuggestions(true) }
+    lazy var btnSugNone = RoundButton("Deselect all", .secondary) { [unowned self] in self.checkAllSuggestions(false) }
+    lazy var btnSugAdd = RoundButton("Add to delete list", .secondary) { [unowned self] in self.addCheckedSuggestions() }
+    lazy var btnSugTrash = RoundButton("Move to Trash", .secondary) { [unowned self] in self.deleteCheckedSuggestions(trash: true) }
+    lazy var btnSugDelete = RoundButton("Delete permanently", .warn) { [unowned self] in self.deleteCheckedSuggestions(trash: false) }
     var suggestGen = 0
     var suggestions: [Suggestion]?
     // Delete list
@@ -282,8 +287,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         btnAccess.tip = "Let the app read every folder (System Settings > Privacy & Security > Full Disk Access)"
         btnUp.tip = "Go to the parent folder (⌘↑)"
         btnRescan.tip = "Rescan the selected folder (⌘R)"
-        btnAddList.tip = "Collect the selected items in the delete list; review them there, then delete them together (⇧⌘D)"
-        btnDelete.tip = "Permanently delete the selected items, bypassing the Trash (⌘⌫)"
+        btnAddList.tip = "Collect the selected items in the delete list; review them there, then delete them together (⌘D)"
+        btnDelete.tip = "Permanently delete the selected items, bypassing the Trash (⇧⌘D or ⌘⌫)"
         btnExport.tip = "Save the scan as an HTML report or a CSV file"
         measure.tip = "Size: file lengths, as Finder shows them. Size on disk: the space really used (blocks, files not downloaded from iCloud)"
         measure.selectedIndex = DirNode.onDisk ? 1 : 0
@@ -341,6 +346,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             p.onSelection = { [unowned self] pg in self.lastView = pg.table; self.updateButtons() }
         }
         pContents.root.isHidden = false
+        if let si = pages.firstIndex(where: { $0 === pSuggest }) { viewTabs.colors[si] = T.SUGGEST }
         listPanel.onLayout = { [unowned self] r in for p in self.pages { p.root.frame = r } }
         viewTabs.background = T.BG
         viewTabs.onChange = { [unowned self] _ in self.showPage() }
@@ -395,9 +401,20 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
         root.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(layoutRoot), name: NSView.frameDidChangeNotification, object: root)
+        // Full Disk Access can be granted while the app runs: check again whenever the app comes to the front.
+        NotificationCenter.default.addObserver(self, selector: #selector(updateAccessButton), name: NSApplication.didBecomeActiveNotification, object: nil)
+        btnAccess.isHidden = FullDiskAccess.granted
         layoutRoot()
         updateButtons()
         updateLiveLabel()
+    }
+
+    /// The Full Disk Access button is only shown while access is missing (scans check it themselves each time).
+    @objc func updateAccessButton() {
+        let granted = FullDiskAccess.granted
+        if btnAccess.isHidden == granted { return }
+        btnAccess.isHidden = granted
+        layoutRoot()
     }
 
     @objc func layoutRoot() {
@@ -407,7 +424,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         let h: CGFloat = 32
         let ap = btnAccess.preferredSize, sp = btnScan.preferredSize, bp = btnBrowse.preferredSize
         btnAccess.frame = NSRect(x: b.width - m - ap.width, y: y, width: ap.width, height: h)
-        btnScan.frame = NSRect(x: btnAccess.frame.minX - 16 - sp.width, y: y, width: sp.width, height: h)
+        btnScan.frame = NSRect(x: (btnAccess.isHidden ? b.width - m + 16 : btnAccess.frame.minX) - 16 - sp.width, y: y, width: sp.width, height: h)
         btnBrowse.frame = NSRect(x: btnScan.frame.minX - gap - bp.width, y: y, width: bp.width, height: h)
         pathLabel.sizeToFit()
         pathLabel.frame.origin = NSPoint(x: m, y: y + (h - pathLabel.frame.height) / 2)
@@ -700,6 +717,15 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             btnBasketTrash.isEnabled = idle && !basket.isEmpty
             btnBasketDelete.isEnabled = idle && !basket.isEmpty
         }
+        if pSuggest != nil {
+            let shown = shownSuggestions
+            let anyChecked = shown.contains { $0.checkState != 0 }
+            btnSugAll.isEnabled = !shown.isEmpty
+            btnSugNone.isEnabled = !shown.isEmpty
+            btnSugAdd.isEnabled = !busy && anyChecked
+            btnSugTrash.isEnabled = idle && anyChecked
+            btnSugDelete.isEnabled = idle && anyChecked
+        }
     }
 
     func updateDriveLabel() {
@@ -958,11 +984,16 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     func handleKey(_ e: NSEvent, in view: NSView) -> Bool {
         let cmd = e.modifierFlags.contains(.command)
+        if pSuggest != nil && view === pSuggest.table && suggestKeyDown(e) { return true }
         switch e.keyCode {
         case 36, 76:                                                     // Return / Enter
             if view === outline, let r = outline.item(atRow: outline.selectedRow) as? ScanRoot, r.node == nil { scanPath(r.path); return true }
             if view !== outline { lastView = view; openSelected(); return true }
         case 51 where cmd: lastView = view; deleteSelected(); return true      // Cmd+Delete
+        case 2 where cmd:                                                // Cmd+D add to the delete list, Shift+Cmd+D delete permanently
+            lastView = view
+            if e.modifierFlags.contains(.shift) { deleteSelected() } else { addSelectionToBasket() }
+            return true
         case 126 where cmd: goUp(); return true                         // Cmd+Up
         case 114: lastView = view; addSelectionToBasket(); return true  // Help / Insert key of full-size keyboards
         default: break
@@ -991,9 +1022,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         add("Copy path", "", [], any, #selector(menuCopy))
         add("Rescan folder", "r", .command, any && !scanning && sel.count == 1 && sel[0].isDir, #selector(menuRescan))
         m.addItem(.separator())
-        if lastView !== pBasket.table { add("Add to delete list", "d", [.command, .shift], deletable, #selector(menuAddList)) }
+        if lastView !== pBasket.table { add("Add to delete list", "d", .command, deletable, #selector(menuAddList)) }
         add("Move to Trash...", "", [], deletable && !scanning, #selector(menuTrash))
-        add("Delete permanently...", "\u{8}", .command, deletable && !scanning, #selector(menuDelete), warn: true)
+        add("Delete permanently...", "d", [.command, .shift], deletable && !scanning, #selector(menuDelete), warn: true)
     }
 
     @objc private func menuOpen() { openSelected() }

@@ -202,6 +202,85 @@ final class SelfTestRun {
         }
         steps.waitUntil(10) { History.load(self.dir) != nil }
         steps.then { self.check(History.load(self.dir) != nil, "history: scan saved for the Changes view") }
+        // Partial delete: a folder on the delete list with a file that cannot be removed (its folder is read-only) stays
+        // on the list with the size of what is left.
+        steps.then {
+            let fm = FileManager.default
+            try? fm.createDirectory(atPath: self.P("R/sub"), withIntermediateDirectories: true)
+            fm.createFile(atPath: self.P("R/free.bin"), contents: Data(count: 6000))
+            fm.createFile(atPath: self.P("R/sub/locked.bin"), contents: Data(count: 4000))
+        }
+        steps.waitUntil(20) { self.find("R")?.files == 2 && self.find("R/sub")?.files == 1 }
+        steps.add { next in
+            guard let r = self.find("R") else { self.check(false, "partial delete: folder R not noticed"); next(); return }
+            chmod(self.P("R/sub"), 0o555)
+            w.basket.removeAll()
+            let t = DeleteTarget(path: r.fullPath, label: "R", isDir: true, size: r.size)
+            t.dir = r
+            w.addTarget(t)
+            let before = t.size
+            w.confirmAndDelete(w.basket, trash: false) { _ in
+                let e = w.basket.first
+                let ok = w.basket.count == 1 && e != nil && PathUtil.same(e!.path, self.P("R")) && e!.size == 4000 && e!.size < before
+                    && e!.size == self.find("R")?.size && e!.note.hasPrefix("partly deleted -- 1 item in use or denied")
+                self.check(ok, "partial delete: R stays on the delete list with what is left (\(e?.size ?? -1) of \(before) bytes, note \"\(e?.note ?? "")\")")
+                chmod(self.P("R/sub"), 0o755)
+                w.basket.removeAll()
+                w.basketChanged()
+                next()
+            }
+        }
+        // Suggestions view: check boxes per item, Select all / Deselect all, a mixed head, delete only the checked items.
+        steps.add { next in
+            let fm = FileManager.default
+            try? fm.createDirectory(atPath: self.P("F"), withIntermediateDirectories: true)
+            fm.createFile(atPath: self.P("F/f1.bin"), contents: Data(count: 3000))
+            fm.createFile(atPath: self.P("F/f2.bin"), contents: Data(count: 5000))
+            let nodes = w.roots.compactMap { $0.node }
+            w.readInBackground({ w.findSuggestions(nodes) }, { found in
+                guard let nm = found.first(where: { $0.name == "node_modules folders" }) else {
+                    self.check(false, "suggestions view: node_modules of P missing"); next(); return
+                }
+                let fake = Suggestion("Old test files", safe: false, note: "self-test")
+                fake.targets = [DeleteTarget(path: self.P("F/f1.bin"), label: "f1.bin", size: 3000), DeleteTarget(path: self.P("F/f2.bin"), label: "f2.bin", size: 5000)]
+                fake.size = 8000
+                fake.location = self.P("F")
+                let list = [nm, fake]
+                Suggestion.resetChecks(list)
+                self.check(nm.checkState == 1 && fake.checkState == 0, "suggestions view: safe items start checked, review-first items unchecked")
+                w.suggestions = list
+                w.viewTabs.selectedIndex = w.pages.firstIndex { $0 === w.pSuggest } ?? 4
+                w.showSuggestions()
+                w.checkAllSuggestions(true)
+                self.check(Suggestion.checked(list).count == 3 && w.btnSugDelete.isEnabled, "suggestions view: Select all checks all 3 items")
+                w.checkAllSuggestions(false)
+                self.check(Suggestion.checked(list).isEmpty && !w.btnSugDelete.isEnabled && !w.btnSugAdd.isEnabled,
+                           "suggestions view: Deselect all unchecks everything; the delete buttons are disabled")
+                fake.expanded = true
+                w.showSuggestions()
+                let pg = w.pSuggest!
+                var clicked = false
+                if let row = pg.items.firstIndex(where: { $0.groupOf != nil && $0.name == "f1.bin" }),
+                   let ci = pg.table.tableColumns.firstIndex(where: { $0.identifier.rawValue == "c0" }) {
+                    let it = pg.items[row]
+                    let pt = NSPoint(x: pg.table.rect(ofColumn: ci).minX + ListCell.checkX(it) + 7, y: pg.table.rect(ofRow: row).midY)
+                    clicked = w.suggestClick(row, pt)
+                }
+                let head = pg.items.first { $0.suggestion === fake && $0.groupOf == nil }
+                self.check(clicked && fake.checkState == 2 && head?.check == 2 && Suggestion.checked(list).count == 1 && w.btnSugDelete.isEnabled,
+                           "suggestions view: clicking a child's checkbox checks it; its head shows mixed")
+                w.deleteCheckedSuggestions(trash: false)
+                next()
+            })
+        }
+        steps.waitUntil(20) { !w.busy }
+        steps.then {
+            self.check(!PathUtil.exists(self.P("F/f1.bin")) && PathUtil.exists(self.P("F/f2.bin")) && PathUtil.exists(self.P("P/node_modules")),
+                       "suggestions view: Delete permanently deleted only the checked item")
+            let fake = w.suggestions?.first { $0.name == "Old test files" }
+            self.check(fake != nil && fake!.targets.count == 1 && fake!.size == 5000 && fake!.checkState == 0,
+                       "suggestions view: re-measured after the delete (\(fake?.targets.count ?? -1) items, \(fake?.size ?? -1) bytes left)")
+        }
         steps.run {
             try? self.log.write(toFile: self.dir + ".log", atomically: true, encoding: .utf8)
             print(self.log, terminator: "")
@@ -265,7 +344,17 @@ final class ShotRun {
                 steps.then { w.findDuplicates() }
                 steps.waitUntil(100) { w.dupeFinder == nil }
             }
-            if p === w.pSuggest { steps.waitUntil(90) { w.suggestions != nil } }
+            if p === w.pSuggest {
+                steps.waitUntil(90) { w.suggestions != nil }
+                steps.then {
+                    // One suggestion opened, with one of its items unchecked (a mixed check), to show the check states.
+                    if let s = w.shownSuggestions.max(by: { $0.targets.count < $1.targets.count }) {
+                        s.expanded = true
+                        if s.targets.count > 1 { s.setChecked(s.targets.count - 1, false) }
+                    }
+                    w.showSuggestions()
+                }
+            }
             if p === w.pFiles || p === w.pTypes { steps.waitUntil(20) { w.readers == 0 } }
             steps.wait(2)
             steps.then { self.shot("\(i + 1)-" + (p.title.split(separator: " ").first.map { String($0).lowercased() } ?? "view")) }

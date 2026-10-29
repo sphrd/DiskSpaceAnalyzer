@@ -141,9 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(folder, "Rescan Folder", #selector(MainWindowController.menuBarRescan(_:)), "r")
         item(folder, "Show in Finder", #selector(MainWindowController.menuBarFinder(_:)), "r", [.command, .shift])
         folder.addItem(.separator())
-        item(folder, "Add to Delete List", #selector(MainWindowController.menuBarAddList(_:)), "d", [.command, .shift])
+        item(folder, "Add to Delete List", #selector(MainWindowController.menuBarAddList(_:)), "d")
         item(folder, "Move to Trash...", #selector(MainWindowController.menuBarTrash(_:)))
-        item(folder, "Delete Permanently...", #selector(MainWindowController.menuBarDelete(_:)), "\u{8}")
+        item(folder, "Delete Permanently...", #selector(MainWindowController.menuBarDelete(_:)), "d", [.command, .shift])
 
         let window = sub("Window")
         item(window, "Minimize", #selector(NSWindow.performMiniaturize(_:)), "m")

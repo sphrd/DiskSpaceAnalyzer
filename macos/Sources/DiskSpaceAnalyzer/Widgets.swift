@@ -156,11 +156,13 @@ final class ScanBar: NSView {
     }
 }
 
-/// Text tabs: the current one in accent with an underline pill, the others muted.
+/// Text tabs: the current one in accent with an underline pill, the others muted. A tab can have a colour of its own
+/// (colors[i]): its title is drawn in it always, and so is its pill when it is the current one.
 final class TabStrip: NSView {
     private var titles: [String]
     private var rects: [NSRect] = []
     private var hover = -1
+    var colors: [Int: NSColor] = [:] { didSet { needsDisplay = true } }
     var selectedIndex = 0 { didSet { if oldValue != selectedIndex { needsDisplay = true; onChange?(selectedIndex) } } }
     var onChange: ((Int) -> Void)?
     var background: NSColor = T.SURFACE
@@ -192,9 +194,10 @@ final class TabStrip: NSView {
         background.setFill(); bounds.fill()
         measure()
         for (i, r) in rects.enumerated() {
-            let c = i == selectedIndex ? T.ACCENT : i == hover ? T.FG : T.MUTED
+            let own = colors[i]
+            let c = i == selectedIndex ? (own ?? T.ACCENT) : i == hover ? T.FG : (own ?? T.MUTED)
             Theme.drawText(titles[i], in: NSRect(x: r.minX, y: r.minY, width: r.width, height: r.height - 4), font: Theme.font, color: c, align: .center)
-            if i == selectedIndex { Theme.fillRound(NSRect(x: r.minX + 6, y: r.maxY - 4, width: r.width - 12, height: 3), 1.5, fill: T.ACCENT) }
+            if i == selectedIndex { Theme.fillRound(NSRect(x: r.minX + 6, y: r.maxY - 4, width: r.width - 12, height: 3), 1.5, fill: own ?? T.ACCENT) }
         }
     }
 

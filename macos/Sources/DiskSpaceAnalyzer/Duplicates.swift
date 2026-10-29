@@ -234,6 +234,6 @@ extension MainWindowController {
         window?.makeFirstResponder(p.table)
         lastView = p.table
         let size = rows.reduce(Int64(0)) { $0 + p.items[$1].size }
-        statusLabel.stringValue = "Selected \(Fmt.count(rows.count)) extra copies (\(Fmt.size(size))). Add them to the delete list (⇧⌘D) or delete them."
+        statusLabel.stringValue = "Selected \(Fmt.count(rows.count)) extra copies (\(Fmt.size(size))). Add them to the delete list (⌘D) or delete them."
     }
 }

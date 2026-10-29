@@ -17,7 +17,9 @@ final class ItemInfo {
     var percent: Double = 0
     var cells: [String] = []
     var color: NSColor?
-
+    var check = -1                     // checkbox: -1 none, 0 unchecked, 1 checked, 2 mixed
+    var chevron = -1                   // expand chevron: -1 none, 0 collapsed, 1 expanded
+    var suggestion: Suggestion?        // suggestions: the suggestion of the row (head or one of its targets)
     var chartSize: Int64 { chartValue >= 0 ? chartValue : size }
     var canDelete: Bool { !isSummary && !isGroup && (isDir || file != nil || targets != nil) }
     var fullPath: String? { isDir ? dir?.fullPath : (file?.fullPath ?? path) }
@@ -127,6 +129,24 @@ final class HoverTable: NSTableView {
 
     override func keyDown(with event: NSEvent) { if onKey?(event) != true { super.keyDown(with: event) } }
 
+    /// Clicks on a row that the page handles itself (checkboxes, chevrons): true = consumed, the selection stays.
+    var onClickAt: ((Int, NSPoint) -> Bool)?
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let r = row(at: p)
+        if r >= 0, let f = onClickAt, f(r, p) { return }
+        super.mouseDown(with: event)
+    }
+
+    /// Redraws the visible cells (their items changed in place).
+    func redrawCells() {
+        enumerateAvailableRowViews { rv, _ in
+            rv.needsDisplay = true
+            for v in rv.subviews { v.needsDisplay = true }
+        }
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let r = row(at: convert(event.locationInWindow, from: nil))
         if r >= 0 && !selectedRowIndexes.contains(r) { selectRowIndexes(IndexSet(integer: r), byExtendingSelection: false) }
@@ -183,7 +203,15 @@ final class ListCell: NSTableCellView {
         let b = bounds
         if index == 0 {
             var x: CGFloat = 6
-            if it.groupOf != nil { x += 18 }
+            if it.chevron >= 0 {
+                Theme.drawText(it.chevron == 1 ? "▾" : "▸", in: NSRect(x: ListCell.chevronX, y: 0, width: 14, height: b.height),
+                               color: strong ? T.BG : T.MUTED, align: .center)
+            }
+            if it.check >= 0 {
+                let cx = ListCell.checkX(it)
+                ListCell.drawCheck(NSRect(x: cx, y: ((b.height - 14) / 2).rounded(), width: 14, height: 14), it.check, strong: strong)
+                x = cx + 14 + 6
+            } else if it.groupOf != nil { x += 18 }
             if !it.isSummary && !it.isGroup {
                 let ir = NSRect(x: x, y: (b.height - 16) / 2, width: 16, height: 16)
                 if it.isDir || it.folderIcon { Theme.drawFolder(ir, strong ? T.BG : T.MUTED) } else { Theme.drawFile(ir, strong ? T.BG : T.MUTED) }
@@ -203,6 +231,38 @@ final class ListCell: NSTableCellView {
         } else {
             Theme.drawText(text, in: b.insetBy(dx: 6, dy: 0), color: fore, align: pg.columns[index].right ? .right : .left)
         }
+    }
+
+    static let chevronX: CGFloat = 4
+    /// x of the checkbox in the name column: a head next to its chevron, its members indented by 18 px.
+    static func checkX(_ it: ItemInfo) -> CGFloat { it.groupOf != nil ? 42 : 24 }
+
+    /// 14 px rounded checkbox: unchecked = muted outline, checked = accent with a check mark, mixed = accent with a dash.
+    /// On a selected (accent) row it is drawn in bg / fg so it stays visible.
+    static func drawCheck(_ r: NSRect, _ state: Int, strong: Bool) {
+        if state == 0 {
+            let p = NSBezierPath(roundedRect: r.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
+            p.lineWidth = 1.5
+            (strong ? T.BG : T.MUTED).setStroke()
+            p.stroke()
+            return
+        }
+        (strong ? T.BG : T.ACCENT).setFill()
+        NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
+        let m = NSBezierPath()
+        if state == 1 {
+            m.move(to: NSPoint(x: r.minX + 3.5, y: r.midY))
+            m.line(to: NSPoint(x: r.minX + 6, y: r.maxY - 3.5))
+            m.line(to: NSPoint(x: r.maxX - 3, y: r.minY + 3.5))
+        } else {
+            m.move(to: NSPoint(x: r.minX + 3.5, y: r.midY))
+            m.line(to: NSPoint(x: r.maxX - 3.5, y: r.midY))
+        }
+        m.lineWidth = 2
+        m.lineCapStyle = .round
+        m.lineJoinStyle = .round
+        (strong ? T.FG : T.BG).setStroke()
+        m.stroke()
     }
 }
 
@@ -294,10 +354,24 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     /// Replaces the rows (sorted by the current column unless the page keeps its own order).
     func setRows(_ rows: [ItemInfo], _ emptyText: String, keepOrder: Bool = false) {
-        items = sortable && !keepOrder ? rows.sorted { ItemInfo.compare($0, $1, sortKey, ascending) } : rows
+        items = sortable && !keepOrder ? sorted(rows) : rows
         table.resetHover()
         table.emptyText = rows.isEmpty ? emptyText : nil
         table.reloadData()
+    }
+
+    /// Rows in the current sort order; members of a group (rows with groupOf) stay right under their head, sorted
+    /// among themselves.
+    func sorted(_ rows: [ItemInfo]) -> [ItemInfo] {
+        let key = sortKey, asc = ascending
+        let less: (ItemInfo, ItemInfo) -> Bool = { ItemInfo.compare($0, $1, key, asc) }
+        if !rows.contains(where: { $0.groupOf != nil }) { return rows.sorted(by: less) }
+        var heads: [ItemInfo] = []
+        var members: [ObjectIdentifier: [ItemInfo]] = [:]
+        for r in rows {
+            if let g = r.groupOf { members[ObjectIdentifier(g), default: []].append(r) } else { heads.append(r) }
+        }
+        return heads.sorted(by: less).flatMap { [$0] + (members[ObjectIdentifier($0)] ?? []).sorted(by: less) }
     }
 
     var selectedItems: [ItemInfo] { table.selectedRowIndexes.compactMap { $0 < items.count ? items[$0] : nil } }
@@ -330,7 +404,7 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         guard sortable, let i = Int(tableColumn.identifier.rawValue.dropFirst()), i < columns.count else { return }
         let key = columns[i].key
         if sortKey == key { ascending.toggle() } else { sortKey = key; ascending = key == "name" || key == "folder" || key == "cat" || key == "note" }
-        items.sort { ItemInfo.compare($0, $1, sortKey, ascending) }
+        items = sorted(items)
         table.resetHover()
         table.reloadData()
         for c in tableView.tableColumns {

@@ -31,7 +31,7 @@ extension MainWindowController {
             it.cells = [it.name, Fmt.size(it.size), Fmt.pct(it.percent), it.folder, it.note]
             rows.append(it)
         }
-        p.setRows(rows, "The delete list is empty.\nSelect files or folders in any view and press Add to delete list (⇧⌘D), then review and delete them here.")
+        p.setRows(rows, "The delete list is empty.\nSelect files or folders in any view and press Add to delete list (⌘D), then review and delete them here.")
         p.setCaption(basket.isEmpty ? "Collect items here from any view, review them, then delete them together."
             : "\(Fmt.count(basket.count)) item\(basket.count == 1 ? "" : "s"), \(Fmt.size(total)).  Move to Trash can be undone (the space is freed when the Trash is emptied); Delete permanently frees it now.")
         p.chartSub = basket.isEmpty ? "" : Fmt.size(total) + " to free"
@@ -92,9 +92,7 @@ extension MainWindowController {
     func deleteBasket(trash: Bool) {
         if busy || scanning || basket.isEmpty { return }
         confirmAndDelete(basket, trash: trash) { [weak self] job in
-            guard let self = self, let job = job else { return }
-            let ok = job.errors.isEmpty
-            self.basket.removeAll { t in t.emptyTrash ? ok : !PathUtil.exists(t.path) || (t.contentsOnly && ok) }
+            guard let self = self, job != nil else { return }
             self.basketChanged()
         }
     }
@@ -108,10 +106,59 @@ extension MainWindowController {
         if sel.isEmpty { return }
         let targets = sel.flatMap { DeleteTarget.from($0) }
         confirmAndDelete(targets, trash: trash) { [weak self] job in
-            guard let self = self, job != nil, !self.basket.isEmpty else { return }
-            self.basket.removeAll { !$0.emptyTrash && !PathUtil.exists($0.path) }
+            guard let self = self, job != nil else { return }
             self.basketChanged()
         }
+    }
+
+    /// After a delete or a move to the Trash: every target still on the delete list and in the suggestions gets the
+    /// size of what is left (from the updated index, or measured just now); targets that are gone, or folders whose
+    /// contents were to go and are now empty, are dropped.
+    func remeasureAfterDelete(_ done: [DeleteTarget], _ job: DeleteJob, _ measured: [String: Int64]) {
+        let failed = job.failedPaths
+        basket.removeAll { !remeasure($0, done, failed, measured) }
+        if let list = suggestions {
+            for s in list {
+                var keep: [DeleteTarget] = [], checks: [Bool] = []
+                for (i, t) in s.targets.enumerated() where remeasure(t, done, failed, measured) { keep.append(t); checks.append(s.isChecked(i)) }
+                if keep.count != s.targets.count && !keep.isEmpty {
+                    s.location = keep.count == 1 ? keep[0].path : "\(Fmt.count(keep.count)) locations"
+                }
+                s.targets = keep
+                s.checked = checks
+                s.size = keep.reduce(Int64(0)) { $0 + $1.size }
+            }
+            suggestions = list.filter { !$0.targets.isEmpty && $0.size > 0 }
+        }
+        updateBasketTitle()
+    }
+
+    /// Updates a target's size (and note) to what is left of it; false when nothing is left.
+    func remeasure(_ t: DeleteTarget, _ done: [DeleteTarget], _ failed: [String], _ measured: [String: Int64]) -> Bool {
+        if !PathUtil.exists(t.path) { return false }
+        let touched = done.contains { PathUtil.isWithin(t.path, $0.path) || PathUtil.isWithin($0.path, t.path) }
+        let left = failed.filter { PathUtil.isWithin($0, t.path) }.count
+        if t.contentsOnly || t.emptyTrash {
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: t.path) {
+                if !names.contains(where: { !t.exclude.contains($0) }) { return false }
+            } else if touched && left == 0 { return false }
+        }
+        if t.isDir || t.emptyTrash {
+            if let n = findScanned(t.path, exact: true), !n.insideSkipped { t.size = MainWindowController.sizeExcluding(n, t.exclude) }
+            else if let m = measured[PathUtil.trim(t.path)] { t.size = m }
+        } else {
+            var st = stat()
+            if lstat(t.path, &st) == 0 { t.size = DirNode.onDisk ? Int64(st.st_blocks) * 512 : Int64(st.st_size) }
+        }
+        if touched && left > 0 { t.note = "partly deleted -- \(Fmt.count(Int64(left))) item\(left == 1 ? "" : "s") in use or denied" }
+        return true
+    }
+
+    /// Size of a folder without the named items directly inside it (kept when only the contents are deleted).
+    static func sizeExcluding(_ n: DirNode, _ exclude: Set<String>) -> Int64 {
+        var size = n.size
+        for name in exclude { if let c = n.child(name) { size -= c.size } }
+        return max(0, size)
     }
 
     static let riskyPaths = ["/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/private", "/opt"]
@@ -173,8 +220,11 @@ extension MainWindowController {
             job.run(targets, trash: trash)
             job.current = "Updating the scan..."
             var fresh: [(DirNode, DirNode)] = []
-            for (t, dn) in dirTargets {
-                if let dn = dn, PathUtil.exists(t.path) { fresh.append((dn, Scanner().run(t.path))) }
+            var measured: [String: Int64] = [:]       // what is left of folders that were not deleted completely
+            for (t, dn) in dirTargets where PathUtil.exists(t.path) {
+                let n = Scanner().run(t.path)
+                if let dn = dn { fresh.append((dn, n)) }
+                measured[PathUtil.trim(t.path)] = MainWindowController.sizeExcluding(n, t.exclude)
             }
             DispatchQueue.main.async {
                 self.whenNoReaders {
@@ -192,6 +242,7 @@ extension MainWindowController {
                     self.setBusy(false)
                     self.ignoreOwnChanges()
                     if let t = target, !self.isAttached(t) { target = nil }
+                    self.remeasureAfterDelete(targets, job, measured)
                     self.current = nil
                     self.refreshTree(target ?? self.active?.node)
                     self.viewsChanged()

@@ -187,6 +187,8 @@ extension MainWindowController {
             return
         }
         if info.isGroup || info.isSummary { return }
+        // A suggestion opens and closes; its items show in Finder.
+        if p === pSuggest && info.suggestion != nil && info.groupOf == nil && info.path == nil { expandSuggestions([info], nil); return }
         openSelected()
     }
 

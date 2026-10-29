@@ -94,7 +94,7 @@ final class AboutWindow: AppDialog {
                  Theme.font9, T.MUTED, y: &y, height: 46, gapAfter: 12)
         addLabel("Keyboard shortcuts", NSFont.boldSystemFont(ofSize: 13), T.FG, y: &y, height: 18, gapAfter: 4)
         let keys: [(String, String)] = [("Return", "Open the selected folder or file"), ("⌘↑", "Up to the parent folder"), ("⌘R", "Rescan the selected folder"),
-                                        ("⇧⌘D", "Add to the delete list"), ("⌘⌫", "Delete permanently"), ("⌘F", "Search files"), ("⇧⌘E", "Export")]
+                                        ("⌘D", "Add to the delete list"), ("⇧⌘D", "Delete permanently (also ⌘⌫)"), ("⌘F", "Search files"), ("⇧⌘E", "Export")]
         for (k, what) in keys {
             let a = NSTextField(labelWithString: k); a.font = Theme.font9; a.textColor = T.FG
             a.frame = NSRect(x: AppDialog.contentX, y: y, width: 80, height: 17)
