@@ -369,7 +369,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             if self.splitPositioned && !self.split2Positioned && r.width > 400 {
                 self.split2Positioned = true
                 let w = r.width, div = self.split2.dividerThickness
-                let chartW = max(180, min(self.split2.frame.height, w - MainWindowController.listMinWidth - div))
+                // The height without the scan bar (the first scan may have started already).
+                let h = self.root.bounds.height - MainWindowController.chromeHeight - 36
+                let chartW = max(180, min(h, w - MainWindowController.listMinWidth - div))
                 self.split2.setPosition(w - chartW - div, ofDividerAt: 0)
             }
         }
