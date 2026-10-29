@@ -204,7 +204,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     let outline = KeyOutline()
     let treeScroll = NSScrollView()
     let listPanel = ContainerPanel()
-    let viewTabs = TabStrip(["Suggestions", "Contents", "Files", "File types", "Duplicates", "Changes", "Delete list"])
+    let viewTabs = TabStrip(["Contents", "Suggestions", "Files", "File types", "Duplicates", "Changes", "Delete list"])
     let chartPanel = ContainerPanel()
     let chart = PieChart()
     let statusLabel = NSTextField(labelWithString: "Choose a drive or folder and press Scan.")

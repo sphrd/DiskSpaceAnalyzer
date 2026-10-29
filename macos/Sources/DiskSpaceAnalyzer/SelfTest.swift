@@ -86,7 +86,7 @@ final class SelfTestRun {
         let w = self.w
         // Start-up: Contents is the first tab and open, Suggestions second; suggestions are found by themselves.
         steps.then {
-            self.check(w.pages.first === w.pContents && w.pages.count > 1 && w.pages[1] === w.pSuggest && w.viewTabs.selectedIndex == 0 && w.activePage === w.pContents,
+            self.check(w.pages.first === w.pContents && w.pages.count > 1 && w.pages[1] === w.pSuggest && w.viewTabs.selectedIndex == 0 && w.activePage === w.pContents && w.viewTabs.titles.first == "Contents",
                        "start: Contents is the first tab and the one open, Suggestions second")
             if let i = w.pages.firstIndex(where: { $0 === w.pSuggest }) { w.viewTabs.selectedIndex = i }
         }
