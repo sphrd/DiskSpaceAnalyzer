@@ -203,7 +203,8 @@ final class SelfTestRun {
         steps.waitUntil(10) { History.load(self.dir) != nil }
         steps.then { self.check(History.load(self.dir) != nil, "history: scan saved for the Changes view") }
         // Partial delete: a folder on the delete list with a file that cannot be removed (its folder is read-only) stays
-        // on the list with the size of what is left.
+        // on the list with the size of what is left. (Wait until the echo of the deletes above is no longer ignored.)
+        steps.wait(3.5)
         steps.then {
             let fm = FileManager.default
             try? fm.createDirectory(atPath: self.P("R/sub"), withIntermediateDirectories: true)
