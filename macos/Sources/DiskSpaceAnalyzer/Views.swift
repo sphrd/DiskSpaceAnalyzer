@@ -20,6 +20,8 @@ final class ItemInfo {
     var check = -1                     // checkbox: -1 none, 0 unchecked, 1 checked, 2 mixed
     var chevron = -1                   // expand chevron: -1 none, 0 collapsed, 1 expanded
     var suggestion: Suggestion?        // suggestions: the suggestion of the row (head or one of its targets)
+    var app: InstalledApp?             // apps: the app of the row (head or one of its leftovers)
+    var leftover: AppLeftover?         // apps: the leftover of a member row
     var chartSize: Int64 { chartValue >= 0 ? chartValue : size }
     var canDelete: Bool { !isSummary && !isGroup && (isDir || file != nil || targets != nil) }
     var fullPath: String? { isDir ? dir?.fullPath : (file?.fullPath ?? path) }

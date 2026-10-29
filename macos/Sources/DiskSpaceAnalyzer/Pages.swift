@@ -21,6 +21,8 @@ extension MainWindowController {
 
         // Suggestions comes right after Contents (the app opens on Contents).
         pSuggest = buildSuggestionsPage(); pages.append(pSuggest)
+        // Apps (installed apps, uninstaller) right after Suggestions.
+        pApps = buildAppsPage(); pages.append(pApps)
 
         // Files: the whole index under the selected folder, filtered; largest first.
         fileSearch.onChange = { [unowned self] in self.fillFiles() }
@@ -193,6 +195,8 @@ extension MainWindowController {
         if info.isGroup || info.isSummary { return }
         // A suggestion opens and closes; its items show in Finder.
         if p === pSuggest && info.suggestion != nil && info.groupOf == nil && info.path == nil { expandSuggestions([info], nil); return }
+        // An app with leftovers opens and closes; an uninstalled app has nothing to show in Finder.
+        if p === pApps, let a = info.app, info.groupOf == nil, a.hasLeftovers || a.uninstalled { expandApps([info], nil); return }
         openSelected()
     }
 

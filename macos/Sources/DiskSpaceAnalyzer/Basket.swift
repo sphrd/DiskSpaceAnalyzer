@@ -202,7 +202,7 @@ extension MainWindowController {
         return t.isDir ? findScanned(t.path, exact: true) : nil
     }
 
-    private func runDelete(_ targets: [DeleteTarget], trash: Bool, _ done: @escaping (DeleteJob?) -> Void) {
+    func runDelete(_ targets: [DeleteTarget], trash: Bool, showErrors: Bool = true, _ done: @escaping (DeleteJob?) -> Void) {
         var target = current
         for t in targets where !t.contentsOnly && !t.emptyTrash {
             if let dn = attachedDir(t), let c = current, c.isUnder(dn) { target = dn.parent }
@@ -262,7 +262,7 @@ extension MainWindowController {
                         self.statusLabel.stringValue = "Freed \(Fmt.size(freed)). \(Fmt.count(job.filesDeleted)) files deleted\(skipped)"
                             + (errors.isEmpty ? "." : ", \(Fmt.count(errors.count)) items could not be deleted.")
                     }
-                    if !errors.isEmpty && self.selfTestDir == nil {
+                    if !errors.isEmpty && showErrors && self.selfTestDir == nil {
                         var err = errors.prefix(20).map { Fmt.shorten($0, 160) }.joined(separator: "\n")
                         if errors.count > 20 { err += "\n... and \(Fmt.count(errors.count - 20)) more" }
                         self.alert("Some items could not be \(trash ? "moved" : "deleted") (in use, protected, or no permission -- Full Disk Access may help):\n\n" + err)

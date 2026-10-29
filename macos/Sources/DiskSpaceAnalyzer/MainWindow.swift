@@ -204,7 +204,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     let outline = KeyOutline()
     let treeScroll = NSScrollView()
     let listPanel = ContainerPanel()
-    let viewTabs = TabStrip(["Contents", "Suggestions", "Files", "File types", "Duplicates", "Changes", "Delete list"])
+    let viewTabs = TabStrip(["Contents", "Suggestions", "Apps", "Files", "File types", "Duplicates", "Changes", "Delete list"])
     let chartPanel = ContainerPanel()
     let chart = PieChart()
     let statusLabel = NSTextField(labelWithString: "Choose a drive or folder and press Scan.")
@@ -218,7 +218,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     // Views (tabs)
     var pages: [Page] = []
-    var pContents: Page!, pFiles: Page!, pTypes: Page!, pDupes: Page!, pSuggest: Page!, pChanges: Page!, pBasket: Page!
+    var pContents: Page!, pFiles: Page!, pTypes: Page!, pDupes: Page!, pSuggest: Page!, pApps: Page!, pChanges: Page!, pBasket: Page!
     var contents: HoverTable { pContents.table }
 
     // Files view
@@ -248,6 +248,17 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var suggestions: [Suggestion]?
     var suggestDirty = false          // the scanned data changed since the suggestions were found: find them again
     var suggestFinding = false
+    // Apps view (uninstaller)
+    lazy var btnAppsRefresh = RoundButton(refresh: { [unowned self] in self.loadApps() })
+    let appSearch = SearchBox("Search apps")
+    lazy var btnUninstall = RoundButton("Uninstall...", .warn) { [unowned self] in self.uninstallSelectedApp() }
+    lazy var btnRemoveLeftovers = RoundButton("Remove leftovers", .warn) { [unowned self] in self.removeCheckedLeftovers() }
+    var apps: [InstalledApp]?
+    var appRoots: [String]?               // where to look for apps (nil = /Applications, its Utilities, ~/Applications)
+    var appsGen = 0
+    var appsLoading = false
+    var appsWorking = false               // looking for leftovers, or waiting for a vendor uninstaller
+    var autoAccept = false                // screenshot run: no confirmations
     // Delete list
     var basket: [DeleteTarget] = []
     lazy var btnBasketRemove = RoundButton("Remove from list", .secondary) { [unowned self] in self.removeFromBasket() }
@@ -357,9 +368,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         outline.menu = contextMenu
         outline.onKey = { [unowned self] e in self.handleKey(e, in: self.outline) }
         outline.tipFor = { [unowned self] r in self.outline.item(atRow: r).flatMap { self.treeToolTip($0) } }
-        // Picking a folder in the tree while Suggestions is open shows that folder's contents.
+        // Picking a folder in the tree while Suggestions or Apps is open shows that folder's contents.
         outline.onUserPick = { [unowned self] in
-            if self.activePage === self.pSuggest, let i = self.pages.firstIndex(where: { $0 === self.pContents }) { self.viewTabs.selectedIndex = i }
+            if self.activePage === self.pSuggest || self.activePage === self.pApps, let i = self.pages.firstIndex(where: { $0 === self.pContents }) { self.viewTabs.selectedIndex = i }
         }
         styleScroll(treeScroll, outline)
         treeScroll.hasHorizontalScroller = false
@@ -767,6 +778,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             btnSugNone.isEnabled = !shown.isEmpty
             btnSugDelete.isEnabled = idle && anyChecked
         }
+        if pApps != nil { updateAppButtons() }
     }
 
     func updateDriveLabel() {
@@ -1036,6 +1048,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     func handleKey(_ e: NSEvent, in view: NSView) -> Bool {
         let cmd = e.modifierFlags.contains(.command)
         if pSuggest != nil && view === pSuggest.table && suggestKeyDown(e) { return true }
+        if pApps != nil && view === pApps.table && appsKeyDown(e) { return true }
         switch e.keyCode {
         case 36, 76:                                                     // Return / Enter
             if view === outline, let r = outline.item(atRow: outline.selectedRow) as? ScanRoot, r.node == nil { scanPath(r.path); return true }
@@ -1068,6 +1081,13 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             m.addItem(it)
         }
         m.autoenablesItems = false
+        if lastView === pApps.table {
+            let app = selectedApp
+            let idle = !busy && !scanning && !appsWorking
+            add("Uninstall...", "", [], idle && app != nil && !app!.uninstalled, #selector(menuUninstall), warn: true)
+            add("Look for leftovers", "", [], idle && app != nil, #selector(menuLeftovers))
+            m.addItem(.separator())
+        }
         add("Open", "", [], any && sel.count == 1, #selector(menuOpen))
         add("Show in Finder", "", [], any, #selector(menuFinder))
         add("Copy path", "", [], any, #selector(menuCopy))
@@ -1078,6 +1098,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         add("Delete permanently...", "d", [.command, .shift], deletable && !scanning, #selector(menuDelete), warn: true)
     }
 
+    @objc private func menuUninstall() { uninstallSelectedApp() }
+    @objc private func menuLeftovers() { lookForLeftoversOfSelected() }
     @objc private func menuOpen() { openSelected() }
     @objc private func menuFinder() { showInFinder() }
     @objc private func menuCopy() { copyPath() }

@@ -88,6 +88,8 @@ final class SelfTestRun {
         steps.then {
             self.check(w.pages.first === w.pContents && w.pages.count > 1 && w.pages[1] === w.pSuggest && w.viewTabs.selectedIndex == 0 && w.activePage === w.pContents && w.viewTabs.titles.first == "Contents",
                        "start: Contents is the first tab and the one open, Suggestions second")
+            self.check(w.pages.count > 2 && w.pages[2] === w.pApps && w.viewTabs.titles == w.pages.map { $0.title },
+                       "start: Apps is the third tab; tab titles match the views (\(w.viewTabs.titles.joined(separator: ", ")))")
             if let i = w.pages.firstIndex(where: { $0 === w.pSuggest }) { w.viewTabs.selectedIndex = i }
         }
         steps.waitUntil(90) { w.suggestions != nil && !w.suggestFinding }
@@ -410,6 +412,82 @@ final class SelfTestRun {
                        "hover: tree node tip shown (\(HoverTip.shared.shownText?.replacingOccurrences(of: "\n", with: " | ") ?? "none"))")
             HoverTip.shared.reset()
         }
+        // Apps: a fake app in <scratch>-apps/Applications is listed (a com.apple.* one is not), its leftovers are found
+        // without uninstalling, then it is uninstalled and its 3 leftovers are removed.
+        let appsDir = dir + "-apps/Applications"
+        var fakeApp = ""
+        steps.then {
+            FakeApp.cleanUp()
+            try? FileManager.default.removeItem(atPath: self.dir + "-apps")
+            fakeApp = FakeApp.create(in: appsDir)
+            FakeApp.writeBundle(appsDir + "/Apple Fake.app", id: "com.apple.dsafake", name: "Apple Fake", version: "1.0", bytes: 1000)
+            w.appRoots = [appsDir]
+            w.apps = nil
+            w.pApps.stale = true
+            w.viewTabs.selectedIndex = w.pages.firstIndex { $0 === w.pApps } ?? 2
+        }
+        steps.waitUntil(60) { w.apps != nil && !w.appsLoading }
+        steps.then {
+            let list = w.apps ?? []
+            let a = list.first { $0.bundleId == FakeApp.bundleId }
+            let measured = Scanner().run(fakeApp).size
+            self.check(list.count == 1 && a != nil && a!.name == FakeApp.name && a!.version == "1.0" && a!.publisher == "Example"
+                       && a!.size == measured && a!.size >= 50 * 1024 && PathUtil.same(a!.path, fakeApp),
+                       "apps: \(FakeApp.name) listed (\(list.count) apps; \"\(a?.name ?? "")\" \(a?.version ?? "?") by \(a?.publisher ?? "?"), \(a?.size ?? -1) bytes, measured \(measured))")
+            self.check(!list.contains { $0.bundleId.lowercased().hasPrefix("com.apple.") }, "apps: the com.apple.* bundle is not listed")
+            self.check(w.pApps.caption.text.hasPrefix("1 app, ") && w.pApps.items.count == 1, "apps: caption \"\(w.pApps.caption.text)\"")
+            let tip = w.pApps.items.first?.toolTip.components(separatedBy: "\n") ?? []
+            self.check(tip == [FakeApp.name, fakeApp, FakeApp.bundleId], "apps: hover tip \(tip.joined(separator: " | "))")
+            w.pApps.select(IndexSet())
+            self.check(!w.btnUninstall.isEnabled && !w.btnRemoveLeftovers.isEnabled, "apps: Uninstall and Remove leftovers disabled without a selection or checks")
+            w.pApps.select(IndexSet(integer: 0))
+            self.check(w.btnUninstall.isEnabled && w.selectedApp === a, "apps: Uninstall enabled for the selected app")
+        }
+        steps.add { next in
+            w.lookForLeftoversOfSelected { found in
+                let a = w.apps?.first { $0.bundleId == FakeApp.bundleId }
+                self.check(found.count == 3 && a != nil && !a!.uninstalled && PathUtil.exists(fakeApp) && w.pApps.items.count == 4,
+                           "apps: Look for leftovers finds \(found.count) without uninstalling (\(w.pApps.items.count) rows)")
+                next()
+            }
+        }
+        steps.add { next in
+            w.uninstallSelectedApp { ok in
+                let a = w.apps?.first { $0.bundleId == FakeApp.bundleId }
+                let found = a?.leftovers ?? []
+                let names = found.map { $0.kind + ": " + PathUtil.name($0.path) }
+                self.check(ok && !PathUtil.exists(fakeApp) && a != nil && a!.uninstalled,
+                           (ci ? "Trash" : "permanent delete") + ": Uninstall removed the app bundle")
+                self.check(found.count == 3 && Set(found.map { $0.path.lowercased() }) == Set(FakeApp.leftoverPaths.map { $0.lowercased() }),
+                           "apps: leftovers found exactly (\(names.joined(separator: ", ")))")
+                self.check(Set(found.map { $0.kind }) == ["Support files", "Cache", "Settings"] && a?.checkState == 1,
+                           "apps: leftovers labelled and checked by default")
+                let head = w.pApps.items.first { $0.app === a && $0.groupOf == nil }
+                let kids = w.pApps.items.filter { $0.app === a && $0.groupOf != nil }.count
+                self.check(head?.name == FakeApp.name + "  (uninstalled — leftovers)" && head?.check == 1 && kids == 3,
+                           "apps: row \"\(head?.name ?? "none")\" with \(kids) leftover rows")
+                let want = "Moved \(FakeApp.name) to the Trash. Found 3 leftovers (\(Fmt.size(a?.leftoverSize ?? -1)))."
+                self.check(w.statusLabel.stringValue == want, "apps: status \"\(w.statusLabel.stringValue)\"")
+                self.check(w.btnRemoveLeftovers.isEnabled, "apps: Remove leftovers enabled")
+                next()
+            }
+        }
+        steps.add { next in
+            w.removeCheckedLeftovers {
+                let left = FakeApp.leftoverPaths.filter { PathUtil.exists($0) }
+                self.check(left.isEmpty, (ci ? "Trash" : "permanent delete") + ": Remove leftovers removed all 3 (\(left.count) left)")
+                self.check(w.apps?.contains { $0.bundleId == FakeApp.bundleId } == false && w.statusLabel.stringValue == "\(FakeApp.name) was removed completely.",
+                           "apps: row gone; status \"\(w.statusLabel.stringValue)\"")
+                next()
+            }
+        }
+        steps.then {
+            FakeApp.cleanUp()
+            try? FileManager.default.removeItem(atPath: self.dir + "-apps")
+            w.appRoots = nil
+            w.apps = nil
+            self.check(!PathUtil.exists(self.dir + "-apps") && FakeApp.leftoverPaths.allSatisfy { !PathUtil.exists($0) }, "apps: test files cleaned up")
+        }
         steps.run {
             try? self.log.write(toFile: self.dir + ".log", atomically: true, encoding: .utf8)
             print(self.log, terminator: "")
@@ -561,8 +639,39 @@ final class ShotRun {
                 }
             }
             if p === w.pFiles || p === w.pTypes { steps.waitUntil(20) { w.readers == 0 } }
+            if p === w.pApps { steps.waitUntil(180) { w.apps != nil && !w.appsLoading } }
             steps.wait(2)
-            steps.then { self.shot("\(num)-" + (p.title.split(separator: " ").first.map { String($0).lowercased() } ?? "view")) }
+            steps.then { self.shot(p === w.pApps ? "apps" : "\(num)-" + (p.title.split(separator: " ").first.map { String($0).lowercased() } ?? "view")) }
+            if p === w.pApps {
+                // A fake app uninstalled, with its leftovers listed under it (cleaned up afterwards).
+                let fakeRoot = dir + "/fake-apps/Applications"
+                steps.add { next in
+                    FakeApp.cleanUp()
+                    try? FileManager.default.removeItem(atPath: self.dir + "/fake-apps")
+                    _ = FakeApp.create(in: fakeRoot)
+                    w.appRoots = InstalledApp.defaultRoots + [fakeRoot]
+                    w.autoAccept = true
+                    w.loadApps {
+                        guard let r = w.pApps.items.firstIndex(where: { $0.app?.bundleId == FakeApp.bundleId }) else { print("apps: fake app not listed"); next(); return }
+                        w.pApps.select(IndexSet(integer: r))
+                        w.uninstallSelectedApp { ok in
+                            print("apps: fake app uninstalled \(ok), status: \(w.statusLabel.stringValue)")
+                            if let last = w.pApps.items.indices.last { w.pApps.table.scrollRowToVisible(last) }
+                            next()
+                        }
+                    }
+                }
+                steps.wait(1.5)
+                steps.then { self.shot("apps-leftovers") }
+                steps.then {
+                    FakeApp.cleanUp()
+                    try? FileManager.default.removeItem(atPath: self.dir + "/fake-apps")
+                    w.autoAccept = false
+                    w.appRoots = nil
+                    w.apps?.removeAll { $0.bundleId == FakeApp.bundleId }
+                    w.showApps()
+                }
+            }
             if p === w.pFiles {
                 // Hover a file: its tip shows the full name and the folder.
                 steps.then { self.hover(w.pFiles.table, w.pFiles.items.firstIndex { $0.file != nil } ?? 0) }
