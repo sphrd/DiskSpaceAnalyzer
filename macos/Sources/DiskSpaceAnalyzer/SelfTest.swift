@@ -84,6 +84,32 @@ final class SelfTestRun {
 
     func start() {
         let w = self.w
+        // Start-up: Suggestions is the first tab and open; it finds the suggestions by itself.
+        steps.then {
+            self.check(w.pages.first === w.pSuggest && w.viewTabs.selectedIndex == 0 && w.activePage === w.pSuggest,
+                       "start: Suggestions is the first tab and the one open")
+        }
+        steps.waitUntil(90) { w.suggestions != nil && !w.suggestFinding }
+        steps.then {
+            self.check(w.suggestions != nil && !w.pSuggest.headline.text.isEmpty == !w.shownSuggestions.isEmpty,
+                       "start: suggestions found without opening the tab (headline \"\(w.pSuggest.headline.text)\")")
+            // Picking a folder in the tree (keyboard: Down) while Suggestions is open shows the Contents of that folder.
+            w.window?.makeFirstResponder(w.outline)
+            if let r = self.root { w.selectDir(r) }
+            let before = w.outline.selectedRow
+            let down = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+            if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: w.window?.windowNumber ?? 0, context: nil, characters: down,
+                                        charactersIgnoringModifiers: down, isARepeat: false, keyCode: 125) {
+                w.outline.keyDown(with: e)
+            }
+            self.check(w.outline.selectedRow != before && w.activePage === w.pContents,
+                       "tree: picking a folder while Suggestions is open switches to Contents (row \(before) -> \(w.outline.selectedRow))")
+            // Programmatic tree changes do not switch views.
+            if let i = w.pages.firstIndex(where: { $0 === w.pSuggest }) { w.viewTabs.selectedIndex = i }
+            if let r = self.root { w.selectDir(r) }
+            self.check(w.activePage === w.pSuggest, "tree: a folder selected by the app keeps the Suggestions view open")
+        }
         steps.then {
             let top = self.root
             self.check(top != nil && top!.files == 9 && top!.dirs == 8, "scan: \(top?.files ?? -1) files, \(top?.dirs ?? -1) folders (expected 9, 8)")
@@ -254,9 +280,14 @@ final class SelfTestRun {
                 w.viewTabs.selectedIndex = w.pages.firstIndex { $0 === w.pSuggest } ?? 4
                 w.showSuggestions()
                 w.checkAllSuggestions(true)
+                let total = list.reduce(Int64(0)) { $0 + $1.size }
+                self.check(w.pSuggest.headline.text == Fmt.size(total) + " can be freed",
+                           "suggestions view: headline \"\(w.pSuggest.headline.text)\"")
+                self.check(w.pSuggest.caption.text.hasPrefix("Checked: 3 items, ") && !w.pSuggest.caption.text.contains("can be freed"),
+                           "suggestions view: caption \"\(w.pSuggest.caption.text)\"")
                 self.check(Suggestion.checked(list).count == 3 && w.btnSugDelete.isEnabled, "suggestions view: Select all checks all 3 items")
                 w.checkAllSuggestions(false)
-                self.check(Suggestion.checked(list).isEmpty && !w.btnSugDelete.isEnabled && !w.btnSugAdd.isEnabled,
+                self.check(Suggestion.checked(list).isEmpty && !w.btnSugDelete.isEnabled,
                            "suggestions view: Deselect all unchecks everything; the delete buttons are disabled")
                 fake.expanded = true
                 w.showSuggestions()
@@ -315,12 +346,68 @@ final class SelfTestRun {
                        "tooltip: file row shows name and folder (\(ft.joined(separator: " | ")))")
             self.check(dt.count == 2 && dt[0] == "C" && PathUtil.same(dt[1], self.P("C")) && tt == dt,
                        "tooltip: folder row and tree node show name and path (\(dt.joined(separator: " | ")))")
-            w.viewTabs.selectedIndex = 0
-            w.selectDir(c)
+            // A suggestion with several locations lists every path (at most 8, then how many more).
+            func multi(_ n: Int) -> [String] {
+                let s = Suggestion("Multi", safe: true, note: "")
+                s.targets = (1...n).map { DeleteTarget(path: self.P("M/m\($0)"), label: "m\($0)", isDir: true, size: 1) }
+                s.size = Int64(n)
+                let it = ItemInfo()
+                it.suggestion = s
+                return it.toolTip.components(separatedBy: "\n")
+            }
+            let m3 = multi(3), m10 = multi(10)
+            self.check(m3 == ["Multi", self.P("M/m1"), self.P("M/m2"), self.P("M/m3")],
+                       "tooltip: a suggestion in 3 places lists the 3 paths (\(m3.joined(separator: " | ")))")
+            self.check(m10.count == 10 && m10[1] == self.P("M/m1") && m10[8] == self.P("M/m8") && m10[9] == "... and 2 more",
+                       "tooltip: a suggestion in 10 places lists 8 paths and \"... and 2 more\" (\(m10.count) lines, last \"\(m10.last ?? "")\")")
+            if let i = w.pages.firstIndex(where: { $0 === w.pContents }) { w.viewTabs.selectedIndex = i }
+            if let r = self.root { w.selectDir(r) }
+            self.check(w.pContents.table.tipFor != nil && w.pContents.table.view(atColumn: 0, row: 0, makeIfNecessary: true)?.toolTip == nil,
+                       "tooltip: list cells have no system tooltip of their own (the hover tip shows instead)")
+        }
+        // The hover tip: shown about 0.45 s after the mouse rests on a row, next to the cursor, replaced on another row.
+        var hoverPoint = NSPoint.zero
+        steps.then {
+            HoverTip.shared.reset()
+            w.pContents.table.simulateMouseMove(row: 0)
+            hoverPoint = HoverTip.shared.point
+        }
+        steps.wait(0.15)
+        steps.then { self.check(!HoverTip.shared.isShown, "hover: no tip right away") }
+        steps.wait(0.6)
+        steps.then {
             let pc = w.pContents!
-            let row = pc.items.firstIndex { $0.file?.name == "dup1.bin" } ?? -1
-            let cell = row >= 0 ? pc.table.view(atColumn: 0, row: row, makeIfNecessary: true) : nil
-            self.check(cell?.toolTip != nil && cell?.toolTip == pc.items[row].toolTip, "tooltip: the list cell carries the row's tooltip")
+            let f = HoverTip.shared.tipWindow?.frame ?? .zero
+            self.check(pc.items.count >= 2 && HoverTip.shared.shownText == pc.items[0].toolTip,
+                       "hover: tip of row 0 shown (\(HoverTip.shared.shownText?.replacingOccurrences(of: "\n", with: " | ") ?? "none"))")
+            self.check(abs(f.minX - (hoverPoint.x + 16)) < 1 && abs(f.maxY - (hoverPoint.y - 20)) < 1,
+                       "hover: tip placed 16 px right of and 20 px below the cursor (tip \(f), cursor \(hoverPoint))")
+            pc.table.simulateMouseMove(row: 1)
+        }
+        steps.wait(0.15)
+        steps.then { self.check(!HoverTip.shared.isShown, "hover: the old tip goes away on another row") }
+        steps.wait(0.6)
+        steps.then {
+            let pc = w.pContents!
+            self.check(pc.items.count >= 2 && HoverTip.shared.shownText == pc.items[1].toolTip,
+                       "hover: tip follows to row 1 (\(HoverTip.shared.shownText?.replacingOccurrences(of: "\n", with: " | ") ?? "none"))")
+            if let e = NSEvent.enterExitEvent(with: .mouseExited, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: w.window?.windowNumber ?? 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) {
+                pc.table.mouseExited(with: e)
+            }
+        }
+        steps.then {
+            self.check(!HoverTip.shared.isShown, "hover: tip hidden when the mouse leaves the list")
+            let row = w.outline.row(forItem: self.find("C"))
+            w.outline.simulateMouseMove(row: row)
+        }
+        steps.wait(0.75)
+        steps.then {
+            let row = w.outline.row(forItem: self.find("C"))
+            let want = row >= 0 ? w.outline.item(atRow: row).flatMap { w.treeToolTip($0) } : nil
+            self.check(want != nil && HoverTip.shared.shownText == want,
+                       "hover: tree node tip shown (\(HoverTip.shared.shownText?.replacingOccurrences(of: "\n", with: " | ") ?? "none"))")
+            HoverTip.shared.reset()
         }
         steps.run {
             try? self.log.write(toFile: self.dir + ".log", atomically: true, encoding: .utf8)
@@ -359,15 +446,85 @@ final class ShotRun {
         }
     }
 
+    /// The window with the hover tip drawn where it shows on screen (the tip is a window of its own).
+    func shotWithTip(_ name: String) {
+        guard let win = app.main.window, let v = win.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        let size = v.bounds.size
+        guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: rep.pixelsWide, pixelsHigh: rep.pixelsHigh, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let ctx = NSGraphicsContext(bitmapImageRep: out) else { return }
+        out.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        _ = rep.draw(in: NSRect(origin: .zero, size: size))
+        if HoverTip.shared.isShown, let tw = HoverTip.shared.tipWindow, let tv = tw.contentView,
+           let trep = tv.bitmapImageRepForCachingDisplay(in: tv.bounds) {
+            tv.cacheDisplay(in: tv.bounds, to: trep)
+            let cr = win.contentRect(forFrameRect: win.frame), tf = tw.frame
+            _ = trep.draw(in: NSRect(x: tf.minX - cr.minX, y: tf.minY - cr.minY, width: tf.width, height: tf.height), from: .zero,
+                          operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        let path = dir + "/" + name + ".png"
+        try? out.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        print("saved \(path)  hover tip: " + (HoverTip.shared.shownText?.replacingOccurrences(of: "\n", with: " | ") ?? "NOT SHOWN"))
+    }
+
+    /// The mouse comes to rest on a row (a synthetic mouse move; the tip appears after its delay).
+    func hover(_ t: NSTableView, _ row: Int) {
+        HoverTip.shared.reset()
+        t.simulateMouseMove(row: row)
+    }
+
     func start() {
         let w = app.main!
+        let contentsIndex = w.pages.firstIndex { $0 === w.pContents } ?? 1
+        // The app opens on Suggestions.
+        steps.waitUntil(90) { w.suggestions != nil && !w.suggestFinding }
+        steps.wait(1.5)
+        steps.then { self.shot("0-suggestions-start") }
+        var saved: [Suggestion]?
+        steps.then {
+            // Hover a suggestion with several locations: its tip lists every path.
+            var row = w.pSuggest.items.firstIndex { $0.groupOf == nil && ($0.suggestion?.targets.count ?? 0) > 1 }
+            if row == nil {
+                // Nothing on this Mac has several locations: a sample row to show how such a tip looks.
+                saved = w.suggestions ?? []
+                let home = PathUtil.home
+                let s = Suggestion("Sample: caches in several places", safe: true, note: "Screenshot sample")
+                s.targets = ["/Library/Caches", home + "/Library/Caches", home + "/Library/Logs", "/private/var/log"].map {
+                    DeleteTarget(path: $0, label: PathUtil.name($0), isDir: true, size: 1 << 20)
+                }
+                s.size = 4 << 20
+                s.location = "4 locations"
+                s.checkAll(true)
+                w.suggestions = (w.suggestions ?? []) + [s]
+                w.showSuggestions()
+                row = w.pSuggest.items.firstIndex { $0.suggestion === s }
+            }
+            if let r = row { self.hover(w.pSuggest.table, r) }
+        }
+        steps.wait(0.9)
+        steps.then {
+            self.shotWithTip("0b-hover-suggestion")
+            HoverTip.shared.reset()
+            if let s = saved { w.suggestions = s; w.showSuggestions() }
+        }
+        steps.then { w.viewTabs.selectedIndex = contentsIndex }
         steps.wait(1.5)
         steps.then { self.shot("1-contents") }
         steps.then {
             print("panes: tree \(Int(w.treePanel.frame.width)), list \(Int(w.listPanel.frame.width)), chart \(Int(w.chartPanel.frame.width)) x \(Int(w.chartPanel.frame.height)), window \(Int(w.window?.frame.width ?? 0)) x \(Int(w.window?.frame.height ?? 0))")
+            // Hover a tree node under the selected one.
+            self.hover(w.outline, min(w.outline.numberOfRows - 1, max(0, w.outline.selectedRow + 1)))
         }
-        for i in 1..<w.pages.count {
-            let p = w.pages[i]
+        steps.wait(0.9)
+        steps.then { self.shotWithTip("1b-hover-tree"); HoverTip.shared.reset() }
+        var n = 2
+        for (i, p) in w.pages.enumerated() where p !== w.pContents {
+            let num = n
+            n += 1
             if p === w.pBasket {
                 steps.then {
                     for it in w.pFiles.items.filter({ $0.canDelete }).prefix(4) { for t in DeleteTarget.from(it) { w.addTarget(t) } }
@@ -386,7 +543,7 @@ final class ShotRun {
                 steps.waitUntil(100) { w.dupeFinder == nil }
             }
             if p === w.pSuggest {
-                steps.waitUntil(90) { w.suggestions != nil }
+                steps.waitUntil(90) { w.suggestions != nil && !w.suggestFinding }
                 steps.then {
                     // One suggestion opened (the largest of those with the most items), with one of its items unchecked
                     // (a mixed check) when it has several, and the smallest suggestion unchecked, to show the check states.
@@ -402,9 +559,15 @@ final class ShotRun {
             }
             if p === w.pFiles || p === w.pTypes { steps.waitUntil(20) { w.readers == 0 } }
             steps.wait(2)
-            steps.then { self.shot("\(i + 1)-" + (p.title.split(separator: " ").first.map { String($0).lowercased() } ?? "view")) }
+            steps.then { self.shot("\(num)-" + (p.title.split(separator: " ").first.map { String($0).lowercased() } ?? "view")) }
+            if p === w.pFiles {
+                // Hover a file: its tip shows the full name and the folder.
+                steps.then { self.hover(w.pFiles.table, w.pFiles.items.firstIndex { $0.file != nil } ?? 0) }
+                steps.wait(0.9)
+                steps.then { self.shotWithTip("\(num)b-hover-file"); HoverTip.shared.reset() }
+            }
         }
-        steps.then { w.viewTabs.selectedIndex = 0; w.measure.selectedIndex = 0 }
+        steps.then { w.viewTabs.selectedIndex = contentsIndex; w.measure.selectedIndex = 0 }
         steps.wait(1.5)
         steps.then { self.shot("\(w.pages.count + 1)-file-size"); w.measure.selectedIndex = 1 }
         steps.then {

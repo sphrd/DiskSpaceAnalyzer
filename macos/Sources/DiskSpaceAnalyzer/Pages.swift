@@ -11,6 +11,9 @@ extension MainWindowController {
     var activePage: Page { pages[min(max(0, viewTabs.selectedIndex), pages.count - 1)] }
 
     func buildViews() {
+        // Suggestions is the first tab and the one open at start.
+        pSuggest = buildSuggestionsPage(); pages.append(pSuggest)
+
         pContents = Page("Contents", [Column("name", "Name", 210), Column("size", "Size", 80, true), Column("size", "% of folder", 125, true),
                                       Column("change", "Change", 80, true), Column("files", "Files", 74, true), Column("dirs", "Folders", 66, true),
                                       Column("mod", "Modified", 128)], barColumn: 2, bar: nil)
@@ -42,13 +45,13 @@ extension MainWindowController {
         pages.append(pTypes)
 
         pDupes = buildDuplicatesPage(); pages.append(pDupes)
-        pSuggest = buildSuggestionsPage(); pages.append(pSuggest)
         pChanges = buildChangesPage(); pages.append(pChanges)
         pBasket = buildBasketPage(); pages.append(pBasket)
     }
 
     func showPage() {
         let p = activePage
+        HoverTip.shared.reset()
         for q in pages { q.root.isHidden = q !== p }
         listPanel.needsLayout = true
         if p.stale { p.stale = false; p.fill() } else { refreshChart() }

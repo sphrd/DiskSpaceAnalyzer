@@ -10,6 +10,9 @@ enum Theme {
     static let font9Bold = NSFont.boldSystemFont(ofSize: 11.5)
     static let font11Bold = NSFont.boldSystemFont(ofSize: 14)
     static let fontBold = NSFont.boldSystemFont(ofSize: 13)
+    static let font15Bold = NSFont.boldSystemFont(ofSize: 18)
+
+    static func lineHeight(_ f: NSFont) -> CGFloat { ceil(f.ascender - f.descender + f.leading) }
 
     static func roundRect(_ r: NSRect, _ radius: CGFloat) -> NSBezierPath {
         NSBezierPath(roundedRect: r, xRadius: min(radius, r.width / 2, r.height / 2), yRadius: min(radius, r.width / 2, r.height / 2))

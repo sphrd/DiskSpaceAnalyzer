@@ -54,16 +54,17 @@ final class Suggestion {
 
 extension MainWindowController {
     func buildSuggestionsPage() -> Page {
-        btnLookAgain.tip = "Measure the suggestions again"
+        btnLookAgain.tip = "Look for space that can be freed again"
         btnSugAll.tip = "Check every suggested item"
         btnSugNone.tip = "Uncheck every suggested item"
-        btnSugAdd.tip = "Add the checked items to the delete list, to review and delete them there"
-        btnSugTrash.tip = "Move the checked items to the Trash (caches: their contents; the Trash item empties the Trash)"
         btnSugDelete.tip = "Delete the checked items now, bypassing the Trash (caches: their contents)"
+        for b in [btnLookAgain, btnSugAll, btnSugNone, btnSugDelete] { b.compact = true }
+        let bar = ActionBar([btnLookAgain, btnSugAll, btnSugNone, btnSugDelete], right: [btnSugDelete])
+        bar.minRowHeight = 0
         let p = Page("Suggestions", [Column("name", "Name", 230), Column("size", "Size", 80, true), Column("size", "% of suggestions", 135, true),
                                      Column("folder", "Location", 280), Column("note", "What deleting means", 420)],
-                     barColumn: 2, bar: ActionBar([btnSugAll, btnSugNone, btnLookAgain, btnSugAdd, btnSugTrash, btnSugDelete],
-                                                  right: [btnSugAdd, btnSugTrash, btnSugDelete]))
+                     barColumn: 2, bar: bar)
+        p.headline.color = T.SUGGEST
         p.chartTitle = "Cleanup suggestions"
         p.chartScope = "of the suggestions"
         p.empty = "Nothing to suggest."
@@ -75,13 +76,16 @@ extension MainWindowController {
     func fillSuggestions(clear: Bool = false, quiet: Bool = false) {
         let p = pSuggest!
         if suggestions != nil && !suggestDirty { showSuggestions(); return }
+        if suggestFinding && !suggestDirty && !clear { return }      // already looking (e.g. the start-up refills)
         suggestDirty = false
         suggestFinding = true
         suggestGen += 1
         let gen = suggestGen
         if suggestions == nil || clear {
+            p.setHeadline("")
             p.setCaption("Looking for space that can be freed...")
             p.setRows([], "Looking for space that can be freed...")
+            if activePage === p { rowSlice = [:]; chart.showLogo(p.chartTitle, "", "Looking for space that can be freed...") }
         } else if !quiet {
             p.setCaption("Looking again for space that can be freed (the scanned data changed)...")
         }
@@ -173,8 +177,9 @@ extension MainWindowController {
         let total = list.reduce(Int64(0)) { $0 + $1.size }
         let checked = Suggestion.checked(list)
         let size = checked.reduce(Int64(0)) { $0 + $1.size }
+        pSuggest.setHeadline(list.isEmpty ? "" : "\(Fmt.size(total)) can be freed")
         pSuggest.setCaption(list.isEmpty ? "Nothing to suggest." :
-            "\(Fmt.size(total)) can probably be freed. Checked: \(Fmt.count(checked.count)) item\(checked.count == 1 ? "" : "s"), \(Fmt.size(size)).  White: safe, rebuilt or downloaded again when needed.  Amber: review first.")
+            "Checked: \(Fmt.count(checked.count)) item\(checked.count == 1 ? "" : "s"), \(Fmt.size(size)).  White: safe, rebuilt or downloaded again when needed.  Amber: review first.")
     }
 
     /// The check marks changed: rows, caption and buttons follow (the row selection stays).
@@ -242,18 +247,6 @@ extension MainWindowController {
         case 124: expandSuggestions(sel, true); return true
         default: return false
         }
-    }
-
-    func addCheckedSuggestions() {
-        if busy { return }
-        let targets = Suggestion.checked(shownSuggestions)
-        if targets.isEmpty { return }
-        var added = 0
-        for t in targets where addTarget(t) { added += 1 }
-        basketChanged()
-        let total = basket.reduce(Int64(0)) { $0 + $1.size }
-        statusLabel.stringValue = added == 0 ? "Already on the delete list."
-            : "Added \(Fmt.count(added)) item\(added == 1 ? "" : "s") to the delete list: now \(Fmt.count(basket.count)) item\(basket.count == 1 ? "" : "s"), \(Fmt.size(total))."
     }
 
     /// Deletes (or moves to the Trash) the checked targets, not the selected rows.

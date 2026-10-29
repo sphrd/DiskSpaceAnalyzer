@@ -29,8 +29,42 @@ final class TreeRowView: NSTableRowView {
 
 final class KeyOutline: NSOutlineView {
     var onKey: ((NSEvent) -> Bool)?
-    override func keyDown(with event: NSEvent) { if onKey?(event) != true { super.keyDown(with: event) } }
+    /// The user picked a row with the mouse or the keyboard (also the row that was selected already, when clicked).
+    var onUserPick: (() -> Void)?
+    /// The hover tip of a row.
+    var tipFor: ((Int) -> String?)?
+
+    override func keyDown(with event: NSEvent) {
+        HoverTip.shared.hide()
+        let before = selectedRow
+        if onKey?(event) != true { super.keyDown(with: event) }
+        if selectedRow != before && selectedRow >= 0 { onUserPick?() }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        HoverTip.shared.hide()
+        let p = convert(event.locationInWindow, from: nil)
+        let r = row(at: p)
+        let onDisclosure = r >= 0 && frameOfOutlineCell(atRow: r).contains(p)
+        super.mouseDown(with: event)
+        if r >= 0 && !onDisclosure && selectedRow == r && event.clickCount == 1 { onUserPick?() }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for a in trackingAreas where a.owner === self && a.userInfo?["tip"] != nil { removeTrackingArea(a) }
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: ["tip": true]))
+    }
+    override func mouseMoved(with event: NSEvent) {
+        let r = row(at: convert(event.locationInWindow, from: nil))
+        HoverTip.shared.track(self, key: r, text: r >= 0 ? tipFor?(r) : nil, event: event)
+    }
+    override func mouseExited(with event: NSEvent) { HoverTip.shared.reset(owner: self) }
+    override func scrollWheel(with event: NSEvent) { HoverTip.shared.reset(owner: self); super.scrollWheel(with: event) }
+
     override func menu(for event: NSEvent) -> NSMenu? {
+        HoverTip.shared.hide()
         let r = row(at: convert(event.locationInWindow, from: nil))
         if r >= 0 { selectRowIndexes(IndexSet(integer: r), byExtendingSelection: false) }
         window?.makeFirstResponder(self)
@@ -155,7 +189,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     lazy var btnScan = RoundButton("Scan", .primary) { [unowned self] in self.startScan() }
     lazy var btnAccess = RoundButton("Full Disk Access...", .secondary) { [unowned self] in self.openFullDiskAccess() }
     lazy var btnUp = RoundButton("Up", .secondary) { [unowned self] in self.goUp() }
-    lazy var btnRescan = RoundButton("Rescan folder", .secondary) { [unowned self] in self.rescanSelected() }
+    lazy var btnRescan = RoundButton(refresh: { [unowned self] in self.rescanSelected() })
     lazy var btnFinder = RoundButton("Show in Finder", .secondary) { [unowned self] in self.showInFinder() }
     lazy var btnAddList = RoundButton("Add to delete list", .secondary) { [unowned self] in self.addSelectionToBasket() }
     lazy var btnDelete = RoundButton("Delete permanently", .warn) { [unowned self] in self.deleteSelected() }
@@ -170,7 +204,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     let outline = KeyOutline()
     let treeScroll = NSScrollView()
     let listPanel = ContainerPanel()
-    let viewTabs = TabStrip(["Contents", "Files", "File types", "Duplicates", "Suggestions", "Changes", "Delete list"])
+    let viewTabs = TabStrip(["Suggestions", "Contents", "Files", "File types", "Duplicates", "Changes", "Delete list"])
     let chartPanel = ContainerPanel()
     let chart = PieChart()
     let statusLabel = NSTextField(labelWithString: "Choose a drive or folder and press Scan.")
@@ -206,11 +240,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var dupeTimer: Timer?
     var onDupesFinished: (() -> Void)?
     // Suggestions view
-    lazy var btnLookAgain = RoundButton("Look again", .secondary) { [unowned self] in self.suggestDirty = true; self.fillSuggestions(clear: true) }
+    lazy var btnLookAgain = RoundButton(refresh: { [unowned self] in self.suggestDirty = true; self.fillSuggestions(clear: true) })
     lazy var btnSugAll = RoundButton("Select all", .secondary) { [unowned self] in self.checkAllSuggestions(true) }
     lazy var btnSugNone = RoundButton("Deselect all", .secondary) { [unowned self] in self.checkAllSuggestions(false) }
-    lazy var btnSugAdd = RoundButton("Add to delete list", .secondary) { [unowned self] in self.addCheckedSuggestions() }
-    lazy var btnSugTrash = RoundButton("Move to Trash", .secondary) { [unowned self] in self.deleteCheckedSuggestions(trash: true) }
     lazy var btnSugDelete = RoundButton("Delete permanently", .warn) { [unowned self] in self.deleteCheckedSuggestions(trash: false) }
     var suggestGen = 0
     var suggestions: [Suggestion]?
@@ -322,6 +354,11 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         outline.target = self; outline.doubleAction = #selector(treeDoubleClick)
         outline.menu = contextMenu
         outline.onKey = { [unowned self] e in self.handleKey(e, in: self.outline) }
+        outline.tipFor = { [unowned self] r in self.outline.item(atRow: r).flatMap { self.treeToolTip($0) } }
+        // Picking a folder in the tree while Suggestions is open shows that folder's contents.
+        outline.onUserPick = { [unowned self] in
+            if self.activePage === self.pSuggest, let i = self.pages.firstIndex(where: { $0 === self.pContents }) { self.viewTabs.selectedIndex = i }
+        }
         styleScroll(treeScroll, outline)
         treeScroll.hasHorizontalScroller = false
         treeHeader.outline = outline
@@ -347,7 +384,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             p.onSorted = { [unowned self] pg in if self.activePage === pg { self.refreshChart() } }
             p.onSelection = { [unowned self] pg in self.lastView = pg.table; self.updateButtons() }
         }
-        pContents.root.isHidden = false
+        activePage.root.isHidden = false
         if let si = pages.firstIndex(where: { $0 === pSuggest }) { viewTabs.colors[si] = T.SUGGEST }
         listPanel.onLayout = { [unowned self] r in for p in self.pages { p.root.frame = r } }
         viewTabs.background = T.BG
@@ -438,8 +475,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         for btn in [btnUp, btnRescan, btnFinder, btnAddList, btnDelete] {
             if btn === btnDelete { x += 10 }
             let p = btn.preferredSize
-            btn.frame = NSRect(x: x, y: y, width: p.width, height: h)
-            x += p.width + gap
+            let bw = btn.isIcon ? h : p.width
+            btn.frame = NSRect(x: x, y: y, width: bw, height: h)
+            x += bw + gap
         }
         let ms = measure.preferredSize, es = btnExport.preferredSize
         measure.frame = NSRect(x: b.width - m - ms.width, y: y, width: ms.width, height: h)
@@ -725,8 +763,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             let anyChecked = shown.contains { $0.checkState != 0 }
             btnSugAll.isEnabled = !shown.isEmpty
             btnSugNone.isEnabled = !shown.isEmpty
-            btnSugAdd.isEnabled = !busy && anyChecked
-            btnSugTrash.isEnabled = idle && anyChecked
             btnSugDelete.isEnabled = idle && anyChecked
         }
     }
@@ -794,7 +830,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             c.pct = Fmt.pct(c.bar)
         }
         c.needsDisplay = true
-        c.toolTip = treeToolTip(item)
         return c
     }
 
@@ -821,6 +856,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     func refreshTree(_ target: DirNode?, fallback: ScanRoot? = nil) {
         var expanded: [Any] = []
         for i in 0..<outline.numberOfRows { if let it = outline.item(atRow: i), outline.isItemExpanded(it) { expanded.append(it) } }
+        HoverTip.shared.reset(owner: outline)
         outline.reloadData()
         for it in expanded {
             if let r = it as? ScanRoot, roots.contains(where: { $0 === r }) { outline.expandItem(r) }
@@ -837,6 +873,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         for i in 0..<outline.numberOfRows { if let it = outline.item(atRow: i), outline.isItemExpanded(it) { expanded.append(it) } }
         let selected = outline.item(atRow: outline.selectedRow)
         suppressTreeSelection = true
+        HoverTip.shared.reset(owner: outline)
         outline.reloadData()
         for it in expanded {
             if let r = it as? ScanRoot, roots.contains(where: { $0 === r }) { outline.expandItem(r) }
@@ -967,7 +1004,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         guard let f = it.file else { showInFinder(); return }
         if lastView !== contents && isAttached(f.dir) {
             selectDir(f.dir)
-            viewTabs.selectedIndex = 0
+            viewTabs.selectedIndex = pages.firstIndex { $0 === pContents } ?? 1
             if let i = pContents.items.firstIndex(where: { $0.file != nil && $0.file!.name == f.name }) {
                 contents.selectRowIndexes(IndexSet(integer: i), byExtendingSelection: false)
                 contents.scrollRowToVisible(i)

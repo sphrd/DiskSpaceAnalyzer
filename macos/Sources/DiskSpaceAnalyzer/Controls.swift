@@ -192,6 +192,7 @@ final class ActionBar: NSView {
     private(set) var items: [BarItem] = []
     private var right = Set<ObjectIdentifier>()
     private(set) var barHeight: CGFloat = 0
+    var minRowHeight: CGFloat = 30
     var onHeightChange: (() -> Void)?
     override var isFlipped: Bool { true }
 
@@ -210,7 +211,7 @@ final class ActionBar: NSView {
     @discardableResult
     func arrange(width: CGFloat) -> CGFloat {
         let gap: CGFloat = 6, W = max(100, width)
-        var h: CGFloat = 30
+        var h: CGFloat = minRowHeight
         for i in items where !i.isHidden { h = max(h, i.preferredSize.height) }
         let leftItems = items.filter { !$0.isHidden && !isRight($0) }
         let rightItems = items.filter { !$0.isHidden && isRight($0) }

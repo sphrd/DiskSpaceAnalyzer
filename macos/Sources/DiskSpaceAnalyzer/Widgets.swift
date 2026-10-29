@@ -2,12 +2,15 @@ import AppKit
 
 enum ButtonKind { case primary, secondary, warn }
 
-/// Flat rounded button (radius 8). The action fires on mouse-up inside the button.
+/// Flat rounded button (radius 8; compact: 9 pt text, radius 7, tighter padding). The action fires on mouse-up inside
+/// the button. An icon button (refresh) is square, as high as its neighbours, and draws a circular arrow.
 final class RoundButton: NSView {
     var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var kind: ButtonKind { didSet { needsDisplay = true } }
     var font: NSFont = Theme.font { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var minChars = 0
+    var compact = false { didSet { font = compact ? Theme.font9 : Theme.font } }
+    private(set) var isIcon = false
     var isEnabled = true { didSet { needsDisplay = true; window?.invalidateCursorRects(for: self) } }
     var onClick: (() -> Void)?
     var tip: String? { didSet { toolTip = tip } }
@@ -17,14 +20,21 @@ final class RoundButton: NSView {
         self.title = title; self.kind = kind; self.onClick = action
         super.init(frame: .zero)
     }
+
+    /// Icon-only refresh button (circular arrow), secondary colours.
+    init(refresh action: (() -> Void)?) {
+        self.title = ""; self.kind = .secondary; self.onClick = action; self.isIcon = true
+        super.init(frame: .zero)
+    }
     required init?(coder: NSCoder) { fatalError() }
 
     override var isFlipped: Bool { true }
 
     var preferredSize: NSSize {
+        let h = compact ? Theme.lineHeight(font) + 10 : ceil(font.ascender - font.descender) + 14
+        if isIcon { return NSSize(width: h, height: h) }
         let sample = minChars > 0 ? String(repeating: "0", count: minChars) : title
-        return NSSize(width: max(Theme.textWidth(sample, font), Theme.textWidth(title, font)) + 32,
-                      height: ceil(font.ascender - font.descender) + 14)
+        return NSSize(width: max(Theme.textWidth(sample, font), Theme.textWidth(title, font)) + (compact ? 20 : 32), height: h)
     }
     override var intrinsicContentSize: NSSize { preferredSize }
 
@@ -54,8 +64,33 @@ final class RoundButton: NSView {
             case .secondary: fill = hover ? T.SECONDARY_HOVER : T.BORDER; fore = T.FG
             }
         }
-        Theme.fillRound(bounds, 8, fill: fill)
-        Theme.drawText(title, in: bounds.insetBy(dx: 8, dy: 0), font: font, color: fore, align: .center)
+        Theme.fillRound(bounds, compact ? 7 : 8, fill: fill)
+        if isIcon { RoundButton.drawRefresh(bounds, fore); return }
+        Theme.drawText(title, in: bounds.insetBy(dx: compact ? 6 : 8, dy: 0), font: font, color: fore, align: .center)
+    }
+
+    /// Circular arrow: a 300 degree arc with its gap at the top right and an arrowhead at its end (flipped view).
+    static func drawRefresh(_ b: NSRect, _ c: NSColor) {
+        let side = min(b.width, b.height)
+        let s = side / 26
+        let r = side * 0.24
+        let ctr = NSPoint(x: b.midX, y: b.midY)
+        let start: CGFloat = -15, end: CGFloat = 285          // in a flipped view angles grow clockwise on screen
+        let p = NSBezierPath()
+        p.appendArc(withCenter: ctr, radius: r, startAngle: start, endAngle: end, clockwise: false)
+        p.lineWidth = 1.8 * s
+        p.lineCapStyle = .round
+        c.setStroke(); p.stroke()
+        let a = end * .pi / 180
+        let e = NSPoint(x: ctr.x + r * cos(a), y: ctr.y + r * sin(a))
+        let t = NSPoint(x: -sin(a), y: cos(a)), n = NSPoint(x: cos(a), y: sin(a))
+        let k = 3.2 * s
+        let head = NSBezierPath()
+        head.move(to: NSPoint(x: e.x + t.x * k * 1.1, y: e.y + t.y * k * 1.1))
+        head.line(to: NSPoint(x: e.x + n.x * k - t.x * k * 0.35, y: e.y + n.y * k - t.y * k * 0.35))
+        head.line(to: NSPoint(x: e.x - n.x * k - t.x * k * 0.35, y: e.y - n.y * k - t.y * k * 0.35))
+        head.close()
+        c.setFill(); head.fill()
     }
 }
 

@@ -26,14 +26,17 @@ final class ItemInfo {
     var tip: String?                   // tooltip set by the view (file types, summaries, group heads, removed folders)
 
     /// Shown when hovering the row: the full name on the first line, the full path on the second (a folder's own path,
-    /// a file's folder; a suggestion its location or how many locations it has; the Trash "Trash").
+    /// a file's folder; a suggestion the path of each of its locations, at most maxTipPaths; the Trash "Trash").
+    static let maxTipPaths = 8
     var toolTip: String {
         if let t = tip { return t }
         if let s = suggestion, groupOf == nil {
-            let loc = s.targets.contains(where: { $0.emptyTrash }) ? "Trash"
-                : s.targets.count == 1 ? s.targets[0].path
-                : s.targets.count > 1 ? "\(Fmt.count(s.targets.count)) locations" : s.location
-            return s.name + "\n" + loc
+            if s.targets.contains(where: { $0.emptyTrash }) { return s.name + "\n" + "Trash" }
+            if s.targets.isEmpty { return s.name + "\n" + s.location }
+            let paths = s.targets.map { PathUtil.trim($0.path) }
+            let shown = paths.prefix(ItemInfo.maxTipPaths).joined(separator: "\n")
+            let more = paths.count - ItemInfo.maxTipPaths
+            return s.name + "\n" + shown + (more > 0 ? "\n... and \(Fmt.count(more)) more" : "")
         }
         if let ts = targets, ts.count == 1 {
             let t = ts[0]
@@ -110,6 +113,16 @@ final class CaptionView: NSView {
     }
 }
 
+/// Large bold line above a page's caption (the Suggestions total).
+final class HeadlineView: NSView {
+    var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
+    var color: NSColor = T.FG
+    override var isFlipped: Bool { true }
+    static let font = Theme.font15Bold
+    static let height = Theme.lineHeight(HeadlineView.font)
+    override func draw(_ dirtyRect: NSRect) { Theme.drawText(text, in: bounds, font: HeadlineView.font, color: color) }
+}
+
 /// Flipped view that lays out its subviews through a closure.
 final class LayoutView: FlatView {
     var onLayout: ((NSRect) -> Void)?
@@ -139,8 +152,16 @@ final class HoverTable: NSTableView {
         onHot?(r)
     }
 
-    override func mouseMoved(with event: NSEvent) { setHot(row(at: convert(event.locationInWindow, from: nil))) }
-    override func mouseExited(with event: NSEvent) { setHot(-1) }
+    override func mouseMoved(with event: NSEvent) {
+        let r = row(at: convert(event.locationInWindow, from: nil))
+        setHot(r)
+        HoverTip.shared.track(self, key: r, text: r >= 0 ? tipFor?(r) : nil, event: event)
+    }
+    override func mouseExited(with event: NSEvent) { setHot(-1); HoverTip.shared.reset(owner: self) }
+    override func scrollWheel(with event: NSEvent) { HoverTip.shared.reset(owner: self); super.scrollWheel(with: event) }
+
+    /// The hover tip of a row.
+    var tipFor: ((Int) -> String?)?
 
     func setHighlight(_ rows: [Int]) {
         let old = linkedRows
@@ -149,14 +170,15 @@ final class HoverTable: NSTableView {
         if let first = rows.min(), !rows.contains(where: { visibleRect.intersects(rect(ofRow: $0)) }) { scrollRowToVisible(first) }
     }
 
-    func resetHover() { hotRow = -1; linkedRows = [] }
+    func resetHover() { hotRow = -1; linkedRows = []; HoverTip.shared.reset(owner: self) }
 
-    override func keyDown(with event: NSEvent) { if onKey?(event) != true { super.keyDown(with: event) } }
+    override func keyDown(with event: NSEvent) { HoverTip.shared.hide(); if onKey?(event) != true { super.keyDown(with: event) } }
 
     /// Clicks on a row that the page handles itself (checkboxes, chevrons): true = consumed, the selection stays.
     var onClickAt: ((Int, NSPoint) -> Bool)?
 
     override func mouseDown(with event: NSEvent) {
+        HoverTip.shared.hide()
         let p = convert(event.locationInWindow, from: nil)
         let r = row(at: p)
         if r >= 0, let f = onClickAt, f(r, p) { return }
@@ -172,6 +194,7 @@ final class HoverTable: NSTableView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        HoverTip.shared.hide()
         let r = row(at: convert(event.locationInWindow, from: nil))
         if r >= 0 && !selectedRowIndexes.contains(r) { selectRowIndexes(IndexSet(integer: r), byExtendingSelection: false) }
         window?.makeFirstResponder(self)
@@ -303,6 +326,7 @@ final class ListCell: NSTableCellView {
 final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let title: String
     let root = LayoutView()
+    let headline = HeadlineView()
     let caption = CaptionView()
     let bar: ActionBar?
     let table = HoverTable()
@@ -358,6 +382,12 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         scroll.borderType = .noBorder
         root.addSubview(scroll)
         root.addSubview(caption)
+        headline.isHidden = true
+        root.addSubview(headline)
+        table.tipFor = { [weak self] r in
+            guard let s = self, r >= 0, r < s.items.count else { return nil }
+            return s.items[r].toolTip
+        }
         root.onLayout = { [weak self] r in self?.layoutPage(r) }
         root.isHidden = true
     }
@@ -365,10 +395,16 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     private func layoutPage(_ r: NSRect) {
         let w = r.width
         let lineH = CaptionView.lineH
+        var top: CGFloat = 0
+        headline.isHidden = headline.text.isEmpty
+        if !headline.isHidden {
+            headline.frame = NSRect(x: 4, y: 4, width: max(10, w - 8), height: HeadlineView.height)
+            top = 4 + HeadlineView.height - 3
+        }
         let lines = caption.lines(width: max(10, w - 8))
         let capH = lineH * lines + 10
-        caption.frame = NSRect(x: 4, y: 5, width: max(10, w - 8), height: lineH * lines + 3)
-        var y = capH
+        caption.frame = NSRect(x: 4, y: top + 5, width: max(10, w - 8), height: lineH * lines + 3)
+        var y = top + capH
         if let b = bar {
             let h = b.arrange(width: w)
             b.frame = NSRect(x: 0, y: y, width: w, height: h)
@@ -381,6 +417,12 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     func setCaption(_ s: String) {
         if caption.text == s { return }
         caption.text = s
+        root.needsLayout = true
+    }
+
+    func setHeadline(_ s: String) {
+        if headline.text == s { return }
+        headline.text = s
         root.needsLayout = true
     }
 
@@ -428,7 +470,6 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         c.index = Int(col.identifier.rawValue.dropFirst()) ?? 0
         c.page = self
         c.item = items[row]
-        c.toolTip = items[row].toolTip
         c.needsDisplay = true
         return c
     }
