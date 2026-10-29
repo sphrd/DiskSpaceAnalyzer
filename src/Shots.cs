@@ -191,12 +191,10 @@ namespace DiskSpaceAnalyzer
                 check(chart.Morphs == 1 && chart.MorphFrames >= 8, "chart: the logo turned into the chart after the scan (" + chart.MorphFrames + " frames)");
                 check(top != null && top.Files == 9 && top.Dirs == 8, string.Format("scan: {0} files, {1} folders (expected 9, 8)", top != null ? top.Files : -1, top != null ? top.Dirs : -1));
 
-                // Chart: every row of at least 2 % of the total (7.2 degrees) has a slice of its own, and at least the 10 largest
-                // rows do (all when fewer); the rest join "smaller items".
+                // Chart: every row of at least 2 % of the total (7.2 degrees) has a slice of its own, in true proportion;
+                // all smaller rows together form one grey "smaller items" slice.
                 {
                     var sl = BuildSlices(contents, top.Size, "of folder");
-                    var ranked = contents.Items.Cast<ListViewItem>().Where(r => ((ItemInfo)r.Tag).ChartSize > 0)
-                        .OrderByDescending(r => ((ItemInfo)r.Tag).ChartSize).ToList();
                     var bad = new List<string>();
                     int ownCount = 0;
                     foreach (ListViewItem r in contents.Items)
@@ -205,22 +203,27 @@ namespace DiskSpaceAnalyzer
                         var s = sl.FirstOrDefault(x => x.Rows.Contains(r));
                         bool own = s != null && s.Color != Theme.CHART_OTHER;
                         if (own) ownCount++;
-                        int rank = ranked.IndexOf(r);
-                        if (own != (rank >= 0 && (rank < 10 || ri.ChartSize >= 0.02 * top.Size))) bad.Add(ri.Name);
+                        if (own != (ri.ChartSize > 0 && ri.ChartSize >= 0.02 * top.Size)) bad.Add(ri.Name);
                     }
-                    check(bad.Count == 0 && ownCount > 0, "chart: rows of 2 % or more, and the 10 largest, get their own slice (" + ownCount + " of " + contents.Items.Count + ")" +
+                    check(bad.Count == 0 && ownCount > 0 && sl.Count(x => x.Color == Theme.CHART_OTHER) <= 1,
+                        "chart: rows of 2 % or more get their own slice, the rest one grey slice (" + ownCount + " of " + contents.Items.Count + ")" +
                         (bad.Count > 0 ? "; wrong: " + string.Join(", ", bad) : ""));
 
-                    // Many small rows (each under 2 %): exactly the 10 largest get their own slice, the rest one grey slice.
+                    // A list like the Files view: a small row first (as if sorted by name), two rows over 2 %, 30 small rows
+                    // and a big "[N smaller files not listed]" row: 3 own slices and exactly one grey slice with all 31 small rows.
                     var many = new SizeListView();
-                    for (int i = 0; i < 30; i++)
-                    {
-                        var mi = new ItemInfo { Name = "f" + i, Size = 1000 - i };
-                        many.Items.Add(new ListViewItem(mi.Name) { Tag = mi });
-                    }
+                    Action<string, long, bool> add = (n, sz, sum) => { var mi = new ItemInfo { Name = n, Size = sz, IsSummary = sum }; many.Items.Add(new ListViewItem(n) { Tag = mi }); };
+                    add("a-small", 900, false);
+                    add("big1", 5000, false);
+                    add("big2", 3000, false);
+                    for (int i = 0; i < 30; i++) add("f" + i, 1000 - i, false);
+                    add("[smaller files not listed]", 50000, true);
                     var ms = BuildSlices(many, 100000, "");
-                    int mOwn = ms.Count(x => x.Color != Theme.CHART_OTHER), mGrey = ms.Count(x => x.Color == Theme.CHART_OTHER);
-                    check(mOwn == 10 && mGrey == 1, "chart: 30 small rows -> the 10 largest get own slices, the rest one grey slice (" + mOwn + " own, " + mGrey + " grey)");
+                    var own3 = ms.Where(x => x.Color != Theme.CHART_OTHER).Select(x => x.Label).ToList();
+                    var grey = ms.Where(x => x.Color == Theme.CHART_OTHER).ToList();
+                    check(own3.SequenceEqual(new[] { "big1", "big2", "[smaller files not listed]" }) && grey.Count == 1 && grey[0].Rows.Count == 31,
+                        "chart: 3 rows over 2 % own slices, all 31 smaller rows in one grey slice (" + string.Join(", ", own3) + "; " + grey.Count + " grey, " +
+                        (grey.Count > 0 ? grey[0].Rows.Count : 0) + " rows)");
                     many.Dispose();
                     UpdateChart(top);
                 }

@@ -41,9 +41,9 @@ open list, and hovering a slice highlights its row and the other way round)
   change since the last scan, counts and dates. The ring chart shows the folder
   and, in two outer rings, its subfolders. Click a part to open it; click the
   centre (the folder's name) to go back up. For a drive it also shows free space.
-- **The chart, in every tab:** the 10 largest items always get a slice of their
-  own (all items when there are fewer), and so does every item of at least 2 % of
-  the total (7.2° of the circle); only the rest is grouped as "N smaller items".
+- **The chart, in every tab:** every item of at least 2 % of the total (7.2° of
+  the circle) gets a slice of its own, in true proportion; all smaller items
+  together form one grey "N smaller items" slice.
 - **Suggestions** (the green tab next to Contents): how much can be freed, in
   large print, and what: the Recycle Bin / Trash, temporary files, caches
   (browsers, developer tools, Xcode, Homebrew...), `node_modules` folders, old

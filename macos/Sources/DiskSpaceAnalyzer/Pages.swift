@@ -6,8 +6,7 @@ extension MainWindowController {
     static let minSizes: [Int64] = [0, 1 << 20, 10 << 20, 100 << 20, 1 << 30]
     static let ageMonths = [0, 3, 6, 12, 24, 60]
     static let maxOwnSlices = 50          // every row of at least 2 % of the total (7.2 degrees) gets a slice of its own
-    static let minOwnSlices = 10          // and always the 10 largest rows (all rows when there are fewer)
-    static let minOwnShare = 0.02         // (2 % allows at most 50); smaller rows merge into "smaller items"
+    static let minOwnShare = 0.02         // (2 % allows at most 50); all smaller rows together form one "smaller items" slice
 
     var activePage: Page { pages[min(max(0, viewTabs.selectedIndex), pages.count - 1)] }
 
@@ -103,23 +102,20 @@ extension MainWindowController {
         return active?.node ?? roots.first { $0.node != nil }?.node
     }
 
-    /// Slices for a list exactly as displayed: one slice per row in row order, except that runs of consecutive small rows
-    /// are merged into one "smaller items" slice. Rows of a group (duplicates) join their group's slice. Fills rowSlice
-    /// so hover links rows and slices in both directions.
+    /// Slices for a list exactly as displayed, in row order: every row of at least 2 % of the total has a slice of its own
+    /// (true proportions); all smaller rows together form one "smaller items" slice, placed where the first of them is.
+    /// Rows of a group (duplicates) join their group's slice. Fills rowSlice so hover links rows and slices both ways.
     func buildSlices(_ p: Page, _ total0: Int64, _ scopeText: String) -> [ChartSlice] {
         rowSlice = [:]
         let rows = p.items
         let total = max(Int64(1), total0)
-        // Own slice: every row of at least 2 % of the total, and at least the 10 largest rows (all rows when there are fewer).
-        let sized = rows.indices.filter { rows[$0].groupOf == nil && rows[$0].chartSize > 0 }
-            .sorted { rows[$0].chartSize > rows[$1].chartSize }
-        let own = Set(sized.enumerated().filter { $0.offset < MainWindowController.minOwnSlices ||
-                Double(rows[$0.element].chartSize) >= MainWindowController.minOwnShare * Double(total) }
-            .map { $0.element }.prefix(MainWindowController.maxOwnSlices))
+        let big = rows.indices.filter { rows[$0].groupOf == nil && rows[$0].chartSize > 0 &&
+            Double(rows[$0].chartSize) >= MainWindowController.minOwnShare * Double(total) }
+        let own = Set(big.sorted { rows[$0].chartSize > rows[$1].chartSize }.prefix(MainWindowController.maxOwnSlices))
         var slices: [ChartSlice] = []
-        var runs: [ChartSlice] = []
         var headSlice: [ObjectIdentifier: Int] = [:]
-        var run: ChartSlice?
+        var rest: ChartSlice?
+        var restIndex = -1
         var colour = 0
         for (i, info) in rows.enumerated() {
             if let g = info.groupOf, let head = headSlice[ObjectIdentifier(g)] {
@@ -128,23 +124,25 @@ extension MainWindowController {
                 continue
             }
             let size = info.chartSize
+            let at: Int
             if own.contains(i) {
-                run = nil
                 let s = ChartSlice(info.name, size, T.CHART[colour % T.CHART.count])
                 colour += 1
                 s.detail = Fmt.pct(100 * Double(size) / Double(total)) + " " + scopeText
                 if info.isDir, let d = info.dir, isAttached(d) { s.dir = d }
                 s.rows = [i]
                 slices.append(s)
+                at = slices.count - 1
             } else {
-                if run == nil { let n = ChartSlice("", 0, T.CHART_OTHER); slices.append(n); runs.append(n); run = n }
-                run!.rows.append(i)
-                run!.size += max(0, size)
+                if rest == nil { let n = ChartSlice("", 0, T.CHART_OTHER); slices.append(n); rest = n; restIndex = slices.count - 1 }
+                rest!.rows.append(i)
+                rest!.size += max(0, size)
+                at = restIndex
             }
-            rowSlice[i] = slices.count - 1
-            headSlice[ObjectIdentifier(info)] = slices.count - 1
+            rowSlice[i] = at
+            headSlice[ObjectIdentifier(info)] = at
         }
-        for s in runs {
+        if let s = rest {
             let n = s.rows.filter { rows[$0].groupOf == nil }.count
             s.label = n == 1 ? rows[s.rows[0]].name : "\(Fmt.count(n)) smaller items"
             s.detail = Fmt.pct(100 * Double(s.size) / Double(total)) + " " + scopeText

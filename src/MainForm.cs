@@ -697,13 +697,12 @@ namespace DiskSpaceAnalyzer
         /// <summary>Folder contents row -> index of the pie slice that contains it.</summary>
         readonly Dictionary<ListViewItem, int> rowSlice = new Dictionary<ListViewItem, int>();
         const int MaxOwnSlices = 50;          // every row of at least 2 % of the total (7.2 degrees) gets a slice of its own
-        const int MinOwnSlices = 10;          // and always the 10 largest rows (all rows when there are fewer)
-        const double MinOwnShare = 0.02;      // (2 % allows at most 50); smaller rows merge into "smaller items"
+        const double MinOwnShare = 0.02;      // (2 % allows at most 50); all smaller rows together form one "smaller items" slice
 
         /// <summary>
-        /// Slices for a list exactly as displayed: one slice per row in row order, except that runs of consecutive small
-        /// rows are merged into one "smaller items" slice. Rows of a group (duplicates) join their group's slice.
-        /// Fills rowSlice so hover links rows and slices in both directions.
+        /// Slices for a list exactly as displayed, in row order: every row of at least 2 % of the total has a slice of its own
+        /// (true proportions); all smaller rows together form one "smaller items" slice, placed where the first of them is.
+        /// Rows of a group (duplicates) join their group's slice. Fills rowSlice so hover links rows and slices both ways.
         /// </summary>
         List<ChartSlice> BuildSlices(SizeListView lv, long total, string scope)
         {
@@ -711,15 +710,13 @@ namespace DiskSpaceAnalyzer
             var rows = lv.Items.Cast<ListViewItem>().Where(it => it.Tag is ItemInfo).ToList();
             total = Math.Max(1, total);
             var own = new HashSet<ListViewItem>(rows
-                .Where(it => ((ItemInfo)it.Tag).GroupOf == null && ((ItemInfo)it.Tag).ChartSize > 0)
-                .OrderByDescending(it => ((ItemInfo)it.Tag).ChartSize)
-                .Where((it, rank) => rank < MinOwnSlices || ((ItemInfo)it.Tag).ChartSize >= MinOwnShare * total)
-                .Take(MaxOwnSlices));
+                .Where(it => ((ItemInfo)it.Tag).GroupOf == null && ((ItemInfo)it.Tag).ChartSize > 0 && ((ItemInfo)it.Tag).ChartSize >= MinOwnShare * total)
+                .OrderByDescending(it => ((ItemInfo)it.Tag).ChartSize).Take(MaxOwnSlices));
 
             var slices = new List<ChartSlice>();
-            var runs = new List<ChartSlice>();
             var headSlice = new Dictionary<ItemInfo, int>();
-            ChartSlice run = null;
+            ChartSlice rest = null;
+            int restIndex = -1;
             int colour = 0;
             foreach (var it in rows)
             {
@@ -732,9 +729,9 @@ namespace DiskSpaceAnalyzer
                     continue;
                 }
                 long size = info.ChartSize;
+                int at;
                 if (own.Contains(it))
                 {
-                    run = null;
                     var s = new ChartSlice
                     {
                         Label = info.Name, Size = size, Color = Theme.CHART[colour++ % Theme.CHART.Length],
@@ -743,17 +740,19 @@ namespace DiskSpaceAnalyzer
                     };
                     s.Rows.Add(it);
                     slices.Add(s);
+                    at = slices.Count - 1;
                 }
                 else
                 {
-                    if (run == null) { run = new ChartSlice { Color = Theme.CHART_OTHER }; slices.Add(run); runs.Add(run); }
-                    run.Rows.Add(it);
-                    run.Size += Math.Max(0, size);
+                    if (rest == null) { rest = new ChartSlice { Color = Theme.CHART_OTHER }; slices.Add(rest); restIndex = slices.Count - 1; }
+                    rest.Rows.Add(it);
+                    rest.Size += Math.Max(0, size);
+                    at = restIndex;
                 }
-                rowSlice[it] = slices.Count - 1;
-                headSlice[info] = slices.Count - 1;
+                rowSlice[it] = at;
+                headSlice[info] = at;
             }
-            foreach (var s in runs)
+            foreach (var s in rest != null ? new[] { rest } : new ChartSlice[0])
             {
                 int n = s.Rows.Count(r => ((ItemInfo)r.Tag).GroupOf == null);
                 s.Label = n == 1 ? ((ItemInfo)s.Rows[0].Tag).Name : string.Format("{0:N0} smaller items", n);

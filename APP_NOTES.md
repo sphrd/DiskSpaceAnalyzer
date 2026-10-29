@@ -164,6 +164,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   (Files view on C: showed one slice + a huge grey arc: only pagefile was over 2 %.) Rule: own slice for every row of at least 2 %
   AND always the 10 largest rows (all rows when fewer), at most 50.
 
+- 2026-10-29: "then why the charts are not following the rules??????????" (README pictures: the 10-slice minimum gave slices of
+  a few KB next to GB ones, invisible; and the "[N not listed]" row took one of the 10 places.) Asked about a minimum slice width:
+  "keep proportions intact, but if smaller than 2% group all of them together." Final rule: own slice for every row of at least
+  2 % (true proportions, at most 50); ALL smaller rows form ONE grey slice (at the first small row's place), no minimum count.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -187,7 +192,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - Pie chart pane (right, 330 px, fixed) holds only the title (selection + path, or used/total/free for a drive) and the
   donut; the centre shows the hovered slice (name, size, share) or the total. Slices mirror the folder contents list
   exactly, in its current row order (rebuilt after every fill and re-sort): every row of at least 2 % of the total
-  (7.2 degrees), and always the 10 largest rows (all when fewer), gets its own slice (at most 50) (accent shades); runs of consecutive smaller rows merge into one grey "N smaller items"
+  (7.2 degrees) gets its own slice in true proportion (at most 50; accent shades); all smaller rows together form one grey "N smaller items"
   slice. A drive root appends "System / not readable" (used - scanned) and "Free space". Free space is an empty
   gap (nothing drawn; a faint `border` fill only while hovered). Slices start at 12 o'clock and run clockwise, so the
   free gap (last) always ends at 12 o'clock, just left of the top vertical line.
@@ -434,3 +439,5 @@ patterns (Part 3) are applied through the WinForms mapping below.
   its files, settings and (Windows) registry keys in place; Windows runs the official uninstaller, checks again and asks to delete
   what is left (registry backed up to .reg); macOS moves the app and all its files to the Trash in one step. Chart: the 10
   largest items always get their own slice, plus every item of at least 2 % (7.2 degrees), at most 50.
+- v1.8.1 (2026-10-29): chart: every item of at least 2 % (7.2 degrees) gets its own slice in true proportion; all smaller
+  items together form one grey slice (no more invisible hairline slices); README shows Suggestions and Apps.
