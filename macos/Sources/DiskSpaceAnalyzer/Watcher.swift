@@ -84,18 +84,28 @@ extension MainWindowController {
     func stopAllWatching() { for s in streams { s.stop() }; streams.removeAll() }
 
     private func enqueue(_ r: ScanRoot, _ paths: [String], _ lost: Bool) {
-        // Our own deletions are applied directly; their echo is ignored.
-        if busy || Date() < ignoreUntil { return }
         if lost && !missed.contains(where: { $0 === r }) { missed.append(r); updateLiveLabel() }
         if fsPending.count > 200_000 { return }
-        fsPending.append(contentsOf: paths)
+        // The echo of our own deletes is ignored (it is applied directly); every other change is queued, also while a
+        // delete runs (applied when it ends).
+        let ignoreOwn = ownDeleting || Date() < ownUntil
+        for p in paths where !(ignoreOwn && isOwnPath(p)) { fsPending.append(p) }
     }
 
-    /// Called when our own delete or rescan finishes: changes until now are already in the scan. Only a short echo is
-    /// ignored, so changes made outside the app right after are not lost (an echo processed again is harmless).
-    func ignoreOwnChanges() {
-        ignoreUntil = Date().addingTimeInterval(0.5)
-        fsPending.removeAll()
+    /// Paths of our own delete: equal to or under one of its targets.
+    func isOwnPath(_ p: String) -> Bool { ownPaths.contains { PathUtil.isWithin(p, $0) } }
+
+    /// A delete starts: events for its targets (not the Trash they go to) are ignored while it runs and for 3 s after.
+    func beginOwnDelete(_ targets: [DeleteTarget]) {
+        ownPaths = targets.filter { !$0.emptyTrash }.map { PathUtil.trim($0.path) }
+        ownDeleting = true
+    }
+
+    /// The delete ended (the scan was updated directly): queued events for its targets are dropped, the rest kept.
+    func endOwnDelete() {
+        ownDeleting = false
+        ownUntil = Date().addingTimeInterval(3)
+        fsPending.removeAll { isOwnPath($0) }
     }
 
     func updateLiveLabel() {

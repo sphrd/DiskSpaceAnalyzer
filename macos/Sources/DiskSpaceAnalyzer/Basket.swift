@@ -215,6 +215,7 @@ extension MainWindowController {
         let before = roots.compactMap { $0.node }.reduce(Int64(0)) { $0 + $1.size }
         let job = DeleteJob()
         deleteJob = job
+        beginOwnDelete(targets)
         setBusy(true)
         DispatchQueue.global(qos: .userInitiated).async {
             job.run(targets, trash: trash)
@@ -240,7 +241,7 @@ extension MainWindowController {
                     }
                     self.deleteJob = nil
                     self.setBusy(false)
-                    self.ignoreOwnChanges()
+                    self.endOwnDelete()
                     if let t = target, !self.isAttached(t) { target = nil }
                     self.remeasureAfterDelete(targets, job, measured)
                     self.current = nil

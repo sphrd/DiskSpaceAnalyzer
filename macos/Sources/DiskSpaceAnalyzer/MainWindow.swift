@@ -259,7 +259,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var fsPending: [String] = []
     var missed: [ScanRoot] = []
     var liveTimer: Timer?
-    var ignoreUntil = Date.distantPast
+    var ownPaths: [String] = []           // targets of our own (last) delete
+    var ownDeleting = false
+    var ownUntil = Date.distantPast
     var lastLiveRefresh = Date.distantPast
     var livePending = false
     // Self-test (--cli selftest)
@@ -1143,7 +1145,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
                     if !FileManager.default.fileExists(atPath: path) { if inside { target = dir.parent }; self.removeNode(dir) }
                     else { self.replaceNode(dir, fresh); if inside { target = MainWindowController.findByPath(fresh, here!) ?? fresh } }
                     if target == nil || self.rootOf(target!.top) == nil { target = dir.parent }
-                    self.ignoreOwnChanges()
                     self.current = nil
                     self.refreshTree(target)
                     self.markSuggestionsDirty()
