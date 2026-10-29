@@ -177,6 +177,7 @@ namespace DiskSpaceAnalyzer
             long before = roots.Where(r => r.Node != null).Sum(r => r.Node.Size);
             var job = new DeleteJob();
             deleteJob = job;
+            BeginOwnChanges(targets.Where(x => !x.RecycleBin).Select(x => x.Path));
             SetBusy(true);
             try
             {
@@ -184,7 +185,7 @@ namespace DiskSpaceAnalyzer
                 job.Current = "Updating the scan...";
                 await ApplyDeleted(targets);
             }
-            finally { deleteJob = null; SetBusy(false); IgnoreOwnChanges(); }
+            finally { deleteJob = null; SetBusy(false); EndOwnChanges(); }
 
             if (target == null || !IsAttached(target)) target = root;
             current = null;

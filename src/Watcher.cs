@@ -20,7 +20,9 @@ namespace DiskSpaceAnalyzer
         readonly ConcurrentQueue<FsChange> fsChanges = new ConcurrentQueue<FsChange>();
         readonly HashSet<ScanRoot> missedChanges = new HashSet<ScanRoot>();
         System.Windows.Forms.Timer liveTimer;
-        DateTime ignoreChangesUntil = DateTime.MinValue;
+        // Paths the app is deleting itself: their change events are its own echo (the scan is updated directly).
+        volatile string[] ownPaths = new string[0];
+        DateTime ownUntil = DateTime.MinValue;
         DateTime lastLiveRefresh = DateTime.MinValue;
         bool livePending;
         Label liveLabel;
@@ -47,7 +49,7 @@ namespace DiskSpaceAnalyzer
                 w.Deleted += onChange;
                 w.Changed += onChange;
                 w.Renamed += (s, e) => Enqueue(WatcherChangeTypes.Renamed, e.FullPath, e.OldFullPath);
-                w.Error += (s, e) => BeginInvoke(new Action(() => { if (DateTime.UtcNow > ignoreChangesUntil) { missedChanges.Add(r); UpdateLiveLabel(); } }));
+                w.Error += (s, e) => BeginInvoke(new Action(() => { if (!busy && DateTime.UtcNow > ownUntil) { missedChanges.Add(r); UpdateLiveLabel(); } }));
                 w.EnableRaisingEvents = true;
                 watchers[r] = w;
             }
@@ -65,19 +67,35 @@ namespace DiskSpaceAnalyzer
 
         void Enqueue(WatcherChangeTypes kind, string path, string old)
         {
-            // Our own deletions are applied directly; their echo is ignored.
-            if (busy || DateTime.UtcNow < ignoreChangesUntil) return;
+            // Only the echo of our own deletes is skipped; changes anywhere else are never lost, even during a delete.
+            if (IsOwnChange(path)) return;
             if (fsChanges.Count > 200000) return;
             fsChanges.Enqueue(new FsChange { Kind = kind, Path = path, OldPath = old });
         }
 
-        /// <summary>Called when our own delete or rescan finishes: changes until now are already in the scan.</summary>
-        void IgnoreOwnChanges()
+        bool IsOwnChange(string path)
         {
-            // Short: changes made outside the app right after our own delete must not be lost; echoes processed again are harmless.
-            ignoreChangesUntil = DateTime.UtcNow.AddMilliseconds(500);
+            if (DateTime.UtcNow > ownUntil) return false;
+            foreach (var o in ownPaths)
+                if (path.Equals(o, StringComparison.OrdinalIgnoreCase) || path.StartsWith(o + "\\", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>A delete of these paths starts: their events are ignored until a few seconds after it ends.</summary>
+        void BeginOwnChanges(IEnumerable<string> paths)
+        {
+            ownPaths = paths.Where(p => !string.IsNullOrEmpty(p)).Select(p => p.TrimEnd('\\')).ToArray();
+            ownUntil = DateTime.MaxValue;
+        }
+
+        void EndOwnChanges()
+        {
+            ownUntil = DateTime.UtcNow.AddSeconds(3);
+            // Drop queued echoes of our own delete; keep everything else.
+            var keep = new List<FsChange>();
             FsChange c;
-            while (fsChanges.TryDequeue(out c)) { }
+            while (fsChanges.TryDequeue(out c)) if (!IsOwnChange(c.Path)) keep.Add(c);
+            foreach (var k in keep) fsChanges.Enqueue(k);
         }
 
         void UpdateLiveLabel()

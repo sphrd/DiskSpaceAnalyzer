@@ -1257,7 +1257,6 @@ namespace DiskSpaceAnalyzer
                 if (inside) target = FindByPath(fresh, here) ?? fresh;
             }
             if (target == null || !IsAttached(target)) target = dir.Parent;
-            IgnoreOwnChanges();
             current = null;
             RefreshTree(target);
             ViewsChanged();

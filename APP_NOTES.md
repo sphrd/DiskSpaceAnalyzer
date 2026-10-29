@@ -316,8 +316,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - **Suggestions refresh:** found once and cached until Look again in v1.7.2. Now `suggestionsDirty` is set by every
   scan, rescan, delete, measure switch and live change; the tab finds them again when shown (live: at most every 20 s,
   temp folders change constantly). Ticks are kept by path, expanded suggestions by name.
-- **Gotcha:** live updates ignored every event for 3 s after our own delete, so outside changes in that window were lost.
-  Now 0.5 s; re-processing our own echoes is harmless.
+- **Gotcha:** live updates ignored every event for 3 s (then 0.5 s) after our own delete, so outside changes in that window
+  were lost (the fast CI runner caught it). Now filtered by path: `BeginOwnChanges(targets)` / `EndOwnChanges()`; events at or
+  under the paths being deleted are ignored during the delete and 3 s after; all other events are always queued.
 - **Hover:** `SetToolTip` on a ListView/TreeView shows once per control entry, not per row, and a TreeView takes over an
   attached tooltip and sizes it to the row (text cut off). Rows and nodes use `Hover()`: a separate owner-drawn ToolTip shown
   on the form 16/20 px from the cursor 450 ms after the row changes, hidden on leave/click/scroll. Suggestions in several places
