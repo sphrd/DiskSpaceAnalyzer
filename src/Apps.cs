@@ -25,7 +25,7 @@ namespace DiskSpaceAnalyzer
         public string IconSource;
         public System.Drawing.Image Icon;
         public long Size, EstimatedSize;
-        public bool Uninstalled, Expanded;
+        public bool Uninstalled, Expanded, Searching;
         /// <summary>Another app with the same program folder (its size is counted there, not here).</summary>
         public string SharedWith;
         public List<Leftover> Leftovers;
@@ -155,20 +155,21 @@ namespace DiskSpaceAnalyzer
             long total = shown.Sum(a => a.Uninstalled ? 0 : a.Size);
             var lv = p.List;
             var keepSel = lv.SelectedItems.Count == 1 ? ((ItemInfo)lv.SelectedItems[0].Tag).Data : null;
-            string top = lv.TopItem != null ? ((ItemInfo)lv.TopItem.Tag).Name : null;
+            // Keep the scroll position on the same row (rows are rebuilt; compare what they stand for, names can repeat).
+            var topInfo = lv.TopItem != null ? (ItemInfo)lv.TopItem.Tag : null;
+            object top = topInfo == null ? null : topInfo.Data ?? (topInfo.GroupOf != null ? topInfo.GroupOf.Data : null);
             var rows = new List<ListViewItem>();
-            // Apps with leftovers first, then by size.
-            foreach (var a in shown.OrderByDescending(a => a.Leftovers != null && a.Leftovers.Count > 0).ThenByDescending(a => a.Size))
+            // Partly removed apps (what is left after an uninstall) first, then by size. Expanding never moves an app.
+            foreach (var a in shown.OrderByDescending(a => a.Uninstalled).ThenByDescending(a => a.Size).ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase))
             {
                 bool hasLeft = a.Leftovers != null && a.Leftovers.Count > 0;
-                bool canExpand = a.SharedWith == null && (a.Leftovers == null || hasLeft);
                 long leftSize = hasLeft ? a.Leftovers.Sum(l => l.Size) : 0;
                 var head = new ItemInfo
                 {
                     Data = a, Name = a.Uninstalled ? a.Name + "  (uninstalled -- leftovers)" : a.Name, Size = a.Uninstalled ? leftSize : a.Size,
                     FolderIcon = true, Icon = a.Icon, Path = string.IsNullOrEmpty(a.Location) ? null : a.Location, Folder = a.Location,
                     Category = a.Publisher, Note = a.Version, Percent = total > 0 && !a.Uninstalled ? 100.0 * a.Size / total : 0,
-                    Expandable = canExpand, Expanded = a.Expanded && hasLeft, Check = a.Uninstalled && hasLeft ? LeftoverState(a) : -1
+                    Expandable = true, Expanded = a.Expanded, Check = a.Uninstalled && hasLeft ? LeftoverState(a) : -1
                 };
                 string where = a.SharedWith != null ? "same folder as " + a.SharedWith : a.IsStore && string.IsNullOrEmpty(a.Location) ? "Microsoft Store" : a.Location;
                 var lvi = Row(head, head.Name, a.Size > 0 || a.Uninstalled ? Fmt.Size(head.Size) : "", a.Uninstalled || a.SharedWith != null ? "" : head.Percent.ToString("0.0") + " %",
@@ -176,7 +177,16 @@ namespace DiskSpaceAnalyzer
                 if (a.SharedWith != null) lvi.ForeColor = Theme.MUTED;
                 if (a.Uninstalled) lvi.ForeColor = Theme.WARN_FG;
                 rows.Add(lvi);
-                if (!hasLeft || !a.Expanded) continue;
+                if (!a.Expanded) continue;
+                if (!hasLeft)
+                {
+                    // While searching, or when nothing was found: one muted line, so the arrow always shows something.
+                    var none = new ItemInfo { GroupOf = head, IsSummary = true, Name = a.Searching ? "Looking for its files and settings..." : "No files or settings found." };
+                    var nr = Row(none, none.Name, "", "", "", "", "", "");
+                    nr.ForeColor = Theme.MUTED;
+                    rows.Add(nr);
+                    continue;
+                }
                 foreach (var l in a.Leftovers.OrderByDescending(x => x.Size))
                 {
                     var it = new ItemInfo
@@ -190,7 +200,7 @@ namespace DiskSpaceAnalyzer
             }
             SetRows(lv, rows, apps.Count == 0 ? "No installed apps were found." : "No app matches \"" + q + "\".");
             if (top != null)
-                foreach (ListViewItem it in lv.Items) if (((ItemInfo)it.Tag).Name == top) { try { lv.TopItem = it; } catch (Exception) { } break; }
+                foreach (ListViewItem it in lv.Items) if (((ItemInfo)it.Tag).Data == top) { try { lv.TopItem = it; } catch (Exception) { } break; }
             if (keepSel != null)
                 foreach (ListViewItem it in lv.Items) if (((ItemInfo)it.Tag).Data == keepSel) { it.Selected = true; break; }
             int installed = apps.Count(a => !a.Uninstalled);
@@ -642,8 +652,15 @@ namespace DiskSpaceAnalyzer
         async void ExpandApp(InstalledApp a, bool expand)
         {
             if (!expand) { a.Expanded = false; ShowApps(); return; }
-            if (a.Leftovers == null) await FindLeftovers(a);
             a.Expanded = true;
+            if (a.Leftovers == null)
+            {
+                if (a.Searching) { ShowApps(); return; }    // already looking; the rows fill in when it is done
+                a.Searching = true;
+                ShowApps();
+                try { await FindLeftovers(a); }
+                finally { a.Searching = false; }
+            }
             ShowApps();
             if (!a.Uninstalled)
                 statusLabel.Text = a.Leftovers.Count == 0 ? a.Name + ": no files or settings found."

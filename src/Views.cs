@@ -284,6 +284,13 @@ namespace DiskSpaceAnalyzer
                 return;
             }
             if (info.IsGroup) return;
+            if (p == pApps)
+            {
+                // An app row opens and closes like a tree node; its items show in Explorer.
+                var app = info.Data as InstalledApp;
+                if (app != null) { ExpandApp(app, !app.Expanded); return; }
+                if (info.IsSummary || info.Path == null || !Native.IsDirectory(info.Path) && !System.IO.File.Exists(info.Path)) return;
+            }
             OpenSelected();
         }
 

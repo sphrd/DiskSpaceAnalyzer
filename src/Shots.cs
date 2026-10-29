@@ -377,9 +377,24 @@ namespace DiskSpaceAnalyzer
                 check(app.Icon != null && app.Icon.Width == Theme.S(16), "apps: the app's own logo is read from its DisplayIcon" +
                     (app.Icon != null ? " (" + app.Icon.Width + "x" + app.Icon.Height + ")" : " (none)"));
 
-                // Expanding shows everything that belongs to the app, without changing anything.
+                // Expanding shows everything that belongs to the app, without changing anything. A bigger app stays above it
+                // (expanding never moves an app), and a line shows right away while its files are being looked for.
+                var big = new InstalledApp { Name = "DSA Bigger App", Size = 1L << 40, Publisher = "", Version = "" };
+                apps.Add(big);
+                ShowApps();
+                Func<List<string>> heads = () => pApps.List.Items.Cast<ListViewItem>().Select(r => (ItemInfo)r.Tag).Where(r => r.GroupOf == null).Select(r => r.Name).ToList();
                 ExpandApp(app, true);
+                var rowNames = pApps.List.Items.Cast<ListViewItem>().Select(r => ((ItemInfo)r.Tag).Name).ToList();
+                check(rowNames.Contains("Looking for its files and settings..."), "apps: expanding shows \"Looking for its files and settings...\" at once");
                 for (int i = 0; i < 50 && app.Leftovers == null; i++) await Task.Delay(100);
+                var order = heads();
+                check(order.IndexOf("DSA Bigger App") == 0 && order.IndexOf("DSA SelfTest App") == 1, "apps: the expanded app keeps its place (" + string.Join(", ", order) + ")");
+                ExpandApp(big, true);
+                for (int i = 0; i < 50 && big.Leftovers == null; i++) await Task.Delay(100);
+                rowNames = pApps.List.Items.Cast<ListViewItem>().Select(r => ((ItemInfo)r.Tag).Name).ToList();
+                check(big.Expanded && rowNames.IndexOf("No files or settings found.") == 1, "apps: an app with nothing found shows \"No files or settings found.\" under it");
+                apps.Remove(big);
+                ShowApps();
                 var names = app.Leftovers != null ? string.Join(", ", app.Leftovers.Select(l => l.Kind + ": " + l.Label)) : "none";
                 check(app.Leftovers != null && app.Leftovers.Count == 4 && SamePath(app.Leftovers[0].Path, appDir) &&
                       app.Leftovers.Any(l => SamePath(l.Path, local)) && app.Leftovers.Any(l => SamePath(l.Path, roam)) &&

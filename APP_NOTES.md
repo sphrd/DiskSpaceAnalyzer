@@ -147,6 +147,13 @@ patterns (Part 3) are applied through the WinForms mapping below.
 
 - 2026-10-29: "show the app logos for the apps found." Both platforms.
 
+- 2026-10-29: "there are lots of bugs now when im trying to open the arrow of each app, i dont understand where the app goes. it
+  doesnt expand, some apps that show up as folders move around... check it." Causes (Windows): apps with found items were sorted
+  to the top, so expanding moved the app away; nothing showed while searching and the arrow vanished when nothing was found;
+  apps sharing a folder had no arrow; double-click opened Explorer. Fixed: order is partly-removed first, then size (expanding
+  never moves a row); every app has an arrow; `Looking for its files and settings...` / `No files or settings found.` child line;
+  double-click on an app row opens/closes it; scroll position kept by row identity.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
