@@ -133,6 +133,7 @@ namespace DiskSpaceAnalyzer
             };
             list.HotItemChanged += it =>
             {
+                tips.SetToolTip(list, it != null ? HoverText(it.Tag as ItemInfo) : null);
                 if (ActivePage.List != list) return;
                 int i;
                 chart.SetHover(it != null && rowSlice.TryGetValue(it, out i) ? i : -1);
@@ -242,6 +243,7 @@ namespace DiskSpaceAnalyzer
         void ViewsChanged()
         {
             if (pages.Count == 0) return;
+            suggestionsDirty = true;
             foreach (var p in pages) if (p != pContents) p.Stale = true;
             UpdateBasketTitle();
             var a = ActivePage;
@@ -275,6 +277,23 @@ namespace DiskSpaceAnalyzer
             }
             if (info.IsGroup) return;
             OpenSelected();
+        }
+
+        /// <summary>Tooltip for a row: the full name, then where it is (full path), so ellipsized names can be read.</summary>
+        static string HoverText(ItemInfo it)
+        {
+            if (it == null || it.IsSummary) return null;
+            if (it.IsGroup) return it.Name;
+            if (it.Ext != null || (it.Category != null && it.File == null && it.Dir == null && it.Targets == null))
+                return it.Name + "\n" + string.Format("{0:N0} files, {1}", it.Files, Fmt.Size(it.Size));
+            string where;
+            if (it.IsDir) where = it.Dir.FullPath;
+            else if (it.File != null) where = it.File.FullPath;
+            else if (it.Targets != null && it.Targets.Count == 1 && it.Targets[0].RecycleBin) where = "Recycle Bin on all drives";
+            else if (it.Targets != null && it.Targets.Count > 1) where = it.Folder;
+            else where = it.Path ?? it.Folder;
+            if (string.IsNullOrEmpty(where) || where == it.Name) return it.Name;
+            return it.Name + "\n" + where;
         }
 
         void ShowFilesSearch()

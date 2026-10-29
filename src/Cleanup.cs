@@ -34,6 +34,9 @@ namespace DiskSpaceAnalyzer
     {
         int suggestGen;
         List<Suggestion> suggestions;
+        /// <summary>The scanned data changed since the suggestions were found (scan, rescan, live change, delete).</summary>
+        bool suggestionsDirty;
+        DateTime lastSuggestFind = DateTime.MinValue;
 
         RoundButton btnSugAdd, btnSugRecycle, btnSugDelete;
 
@@ -65,7 +68,18 @@ namespace DiskSpaceAnalyzer
         void FillSuggestions()
         {
             var p = pSuggest;
-            if (suggestions != null) { ShowSuggestions(); return; }
+            if (suggestions != null && !suggestionsDirty) { ShowSuggestions(); return; }
+            suggestionsDirty = false;
+            lastSuggestFind = DateTime.UtcNow;
+            // Keep the user's choices across a new search: ticks by path, expanded suggestions by name.
+            var ticks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var open = new HashSet<string>();
+            if (suggestions != null)
+                foreach (var s in suggestions)
+                {
+                    if (s.Expanded) open.Add(s.Name);
+                    foreach (var tg in s.Targets) ticks[tg.RecycleBin ? "<bin>" : tg.Path] = tg.Checked;
+                }
             int gen = ++suggestGen;
             p.Caption.Text = "Looking for space that can be freed...";
             SetRows(p.List, new List<ListViewItem>(), "Looking for space that can be freed...");
@@ -77,8 +91,16 @@ namespace DiskSpaceAnalyzer
                 {
                     if (gen != suggestGen || IsDisposed) return;
                     suggestions = t.IsFaulted ? new List<Suggestion>() : found;
-                    // Safe suggestions start ticked, "review first" ones unticked.
-                    foreach (var s in suggestions) foreach (var tg in s.Targets) tg.Checked = s.Safe;
+                    // Safe suggestions start ticked, "review first" ones unticked; earlier choices are kept.
+                    foreach (var s in suggestions)
+                    {
+                        s.Expanded = open.Contains(s.Name);
+                        foreach (var tg in s.Targets)
+                        {
+                            bool was;
+                            tg.Checked = ticks.TryGetValue(tg.RecycleBin ? "<bin>" : tg.Path, out was) ? was : s.Safe;
+                        }
+                    }
                     ShowSuggestions();
                 }, TaskScheduler.FromCurrentSynchronizationContext());
         }

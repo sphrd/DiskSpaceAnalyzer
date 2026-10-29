@@ -125,6 +125,9 @@ patterns (Part 3) are applied through the WinForms mapping below.
   all buttons, so that user can customize seletion and delete direvtly form there. also give a disinguishing color to the
   suggestion tab."
 
+- 2026-10-29: "after deleting files outside the program, in the suggestion tab i see still the old suggestions even after re
+  scanning. Also when hovering show full file name an path."
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -304,6 +307,12 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - **After every delete** `AfterDeleteRemeasure` measures each attempted target (and the same paths in the delete list and
   suggestions) from the updated scan: gone ones leave, the rest keep the remaining size with `partly deleted -- ...`.
   (v1.7.2 kept the original size after a partial delete.) **Run as administrator** is hidden when elevated.
+- **Suggestions refresh:** found once and cached until Look again in v1.7.2. Now `suggestionsDirty` is set by every
+  scan, rescan, delete, measure switch and live change; the tab finds them again when shown (live: at most every 20 s,
+  temp folders change constantly). Ticks are kept by path, expanded suggestions by name.
+- **Gotcha:** live updates ignored every event for 3 s after our own delete, so outside changes in that window were lost.
+  Now 0.5 s; re-processing our own echoes is harmless.
+- **Hover:** one owner-drawn dark tooltip (`tips`) for buttons, list rows (name + full path, `HoverText`) and tree nodes.
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
 - **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI

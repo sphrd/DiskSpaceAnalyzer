@@ -74,7 +74,8 @@ namespace DiskSpaceAnalyzer
         /// <summary>Called when our own delete or rescan finishes: changes until now are already in the scan.</summary>
         void IgnoreOwnChanges()
         {
-            ignoreChangesUntil = DateTime.UtcNow.AddSeconds(3);
+            // Short: changes made outside the app right after our own delete must not be lost; echoes processed again are harmless.
+            ignoreChangesUntil = DateTime.UtcNow.AddMilliseconds(500);
             FsChange c;
             while (fsChanges.TryDequeue(out c)) { }
         }
@@ -152,7 +153,10 @@ namespace DiskSpaceAnalyzer
             if (files.Count > 0 || added.Count > 0 || structure)
             {
                 livePending = true;
-                if (structure) foreach (var p in pages) if (p != pContents) p.Stale = true;
+                suggestionsDirty = true;
+                foreach (var p in pages) if (p != pContents && (structure || p == pSuggest || p == pFiles || p == pTypes)) p.Stale = true;
+                // Temporary folders change all the time: refresh an open Suggestions tab at most every 20 s.
+                if (ActivePage == pSuggest && !busy && (DateTime.UtcNow - lastSuggestFind).TotalSeconds > 20) { pSuggest.Stale = false; FillSuggestions(); }
             }
             if (livePending && (DateTime.UtcNow - lastLiveRefresh).TotalSeconds >= 4) RefreshAfterLive();
         }

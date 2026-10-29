@@ -79,6 +79,21 @@ namespace DiskSpaceAnalyzer
                 await Task.Delay(1500);
                 if (ShotDemo) ClearHover();
                 SaveShot("1-contents");
+                // The hover tooltip is its own window: show it on the first file row and capture that part of the screen.
+                var row = contents.Items.Cast<ListViewItem>().FirstOrDefault(x => x.Tag is ItemInfo && ((ItemInfo)x.Tag).File != null) ?? (contents.Items.Count > 0 ? contents.Items[0] : null);
+                if (row != null && !ShotDemo)
+                {
+                    var rb = contents.GetItemRect(row.Index);
+                    tips.Show(HoverText((ItemInfo)row.Tag), contents, rb.X + S(40), rb.Bottom + S(4), 5000);
+                    await Task.Delay(700);
+                    var origin = contents.PointToScreen(new Point(rb.X, rb.Y));
+                    using (var bmp = new Bitmap(S(700), S(110)))
+                    {
+                        using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(origin.X, origin.Y, 0, 0, bmp.Size);
+                        bmp.Save(Path.Combine(ShotDir, "1b-hover-tooltip.png"), ImageFormat.Png);
+                    }
+                    tips.Hide(contents);
+                }
                 for (int i = 1; i < pages.Count; i++)
                 {
                     var p = pages[i];
@@ -254,6 +269,28 @@ namespace DiskSpaceAnalyzer
                 bool all1 = sg.CheckState == 1 && CheckedSuggestionTargets().Count == 2;
                 check(none0 && mixed && all1, "suggestions: deselect all, one ticked = mixed, select all");
                 suggestions = saved;
+
+                // Hover text: full name and full path.
+                var dupFile = Scanner.ListFiles(FindScanned(P("C"), true)).First(f => f.Name == "dup1.bin");
+                string ft = HoverText(ItemInfo.ForFile(dupFile, 0)), dt = HoverText(ItemInfo.ForDir(FindScanned(P("C"), true), 0));
+                check(ft == "dup1.bin\n" + P(@"C\dup1.bin") && dt == "C\n" + P("C"), "hover: full name and path for files and folders");
+
+                // Suggestions are found again after a change outside the app (v1.7.2 kept the old list).
+                suggestions = null;
+                viewTabs.SelectedIndex = pages.IndexOf(pSuggest);
+                FillSuggestions();
+                for (int i = 0; i < 100 && suggestions == null; i++) await Task.Delay(100);
+                bool hadNm = suggestions != null && suggestions.Any(s2 => s2.Name == "node_modules folders");
+                Directory.Delete(P("P"), true);
+                for (int i = 0; i < 40 && FindScanned(P(@"P\node_modules"), true) != null; i++) await Task.Delay(250);
+                string diag = string.Format("P scanned: {0}, dirty: {1}, watchers {2}, missed {3}, queued {4}, raising {5}", FindScanned(P("P"), true) != null, suggestionsDirty, watchers.Count, missedChanges.Count, fsChanges.Count, watchers.Values.All(w => w.EnableRaisingEvents));
+                var before2 = suggestions;
+                FillSuggestions();
+                for (int i = 0; i < 100 && suggestions == before2; i++) await Task.Delay(100);
+                check(hadNm && suggestions != before2 && !suggestions.Any(s2 => s2.Name == "node_modules folders"),
+                    "suggestions: found again after an outside delete (node_modules gone)" + string.Format(" [before {0}, new list {1}, still there {2}, {3}]",
+                        hadNm, suggestions != before2, suggestions != null && suggestions.Any(s2 => s2.Name == "node_modules folders"), diag));
+                viewTabs.SelectedIndex = 0;
             }
             catch (Exception ex) { check(false, "exception: " + ex); }
             try { File.WriteAllText(dir + ".log", log.ToString()); } catch (Exception) { }

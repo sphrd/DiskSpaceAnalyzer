@@ -52,6 +52,8 @@ open list, and hovering a slice highlights its row and the other way round)
   and more. Expand a suggestion to see every location, tick exactly what you want
   (**Select all** / **Deselect all**), and delete it right there or add it to the
   delete list. Safe items start ticked; items to review first start unticked.
+  Suggestions are looked up again whenever the disk changes or you rescan.
+- Hover any row or folder to see its full name and path.
 - **Changes:** which folders grew or shrank since the previous scan.
 
 ![Duplicates: groups of identical files and the space their extra copies take (demo data)](assets/screenshot-duplicates.png)

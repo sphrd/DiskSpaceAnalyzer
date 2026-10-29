@@ -69,6 +69,20 @@ namespace DiskSpaceAnalyzer
 
         public MainForm(string initialPath)
         {
+            // One dark tooltip for buttons, list rows and tree nodes.
+            tips.OwnerDraw = true;
+            tips.Popup += (s, e) =>
+            {
+                var sz = TextRenderer.MeasureText(tips.GetToolTip(e.AssociatedControl), Theme.FONT_9);
+                e.ToolTipSize = new Size(sz.Width + S(16), sz.Height + S(10));
+            };
+            tips.Draw += (s, e) =>
+            {
+                e.Graphics.Clear(Theme.SURFACE);
+                using (var pen = new Pen(Theme.BORDER)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                TextRenderer.DrawText(e.Graphics, e.ToolTipText, Theme.FONT_9, new Rectangle(S(8), S(5), e.Bounds.Width - S(16), e.Bounds.Height - S(10)),
+                    Theme.FG, TextFormatFlags.NoPrefix | TextFormatFlags.Left);
+            };
             using (var g = CreateGraphics()) Theme.Scale = g.DpiX / 96f;
             isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
 
@@ -166,6 +180,17 @@ namespace DiskSpaceAnalyzer
                 else if (e.Node.Tag is ScanRoot) ShowUnscanned((ScanRoot)e.Node.Tag);
             };
             tree.NodeMouseClick += (s, e) => { if (e.Button == MouseButtons.Right) tree.SelectedNode = e.Node; };
+            TreeNode tipNode = null;
+            tree.MouseMove += (s, e) =>
+            {
+                var n = tree.GetNodeAt(e.Location);
+                if (n == tipNode) return;
+                tipNode = n;
+                var d = n != null ? n.Tag as DirNode : null;
+                var r = n != null ? n.Tag as ScanRoot : null;
+                tips.SetToolTip(tree, d != null ? d.Name.TrimEnd('\\') + "\n" + d.FullPath : r != null ? r.DisplayName + "\n" + r.Path : null);
+            };
+            tree.MouseLeave += (s, e) => tipNode = null;
             tree.NodeMouseDoubleClick += (s, e) => { var r = e.Node.Tag as ScanRoot; if (r != null) ScanPath(r.Path); };
             tree.Enter += (s, e) => lastView = tree;
             // Samples are the widest expected value or the header title, whichever is wider.
