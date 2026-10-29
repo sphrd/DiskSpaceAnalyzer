@@ -23,6 +23,7 @@ final class ItemInfo {
     var app: InstalledApp?             // apps: the app of the row (head or one of its leftovers)
     var leftover: AppLeftover?         // apps: the leftover of a member row
     var hideBar = false                // no percentage bar (the bar column's cell stays empty)
+    var icon: NSImage?                 // drawn instead of the folder/file icon (apps: the app's own icon)
     var chartSize: Int64 { chartValue >= 0 ? chartValue : size }
     var canDelete: Bool { !isSummary && !isGroup && (isDir || file != nil || targets != nil) }
     var fullPath: String? { isDir ? dir?.fullPath : (file?.fullPath ?? path) }
@@ -274,7 +275,8 @@ final class ListCell: NSTableCellView {
             else if it.groupOf != nil { x += 18 }
             if !it.isSummary && !it.isGroup {
                 let ir = NSRect(x: x, y: (b.height - 16) / 2, width: 16, height: 16)
-                if it.isDir || it.folderIcon { Theme.drawFolder(ir, strong ? T.BG : T.MUTED) } else { Theme.drawFile(ir, strong ? T.BG : T.MUTED) }
+                if let img = it.icon { img.draw(in: ir, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high.rawValue]) }
+                else if it.isDir || it.folderIcon { Theme.drawFolder(ir, strong ? T.BG : T.MUTED) } else { Theme.drawFile(ir, strong ? T.BG : T.MUTED) }
                 x += 22
             }
             Theme.drawText(text, in: NSRect(x: x, y: 0, width: max(0, b.width - x - 4), height: b.height), font: it.isGroup ? Theme.fontBold : Theme.font, color: fore)

@@ -21,6 +21,34 @@ final class InstalledApp {
     var expanded = false
     var loadingItems = false
     var itemWaiters: [() -> Void] = []
+    var icon: NSImage?                   // the app's own icon at row size; nil = not loaded yet
+    var iconRequested = false
+
+    static let iconSize = NSSize(width: 16, height: 16)
+
+    /// The bundle's icon (Finder's icon for it) drawn once at row size, so rows only blit a small bitmap.
+    static func loadIcon(_ path: String) -> NSImage {
+        let src = NSWorkspace.shared.icon(forFile: path)
+        let s = iconSize
+        let scale: CGFloat = 2
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(s.width * scale), pixelsHigh: Int(s.height * scale),
+                                   bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                   colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        let img = NSImage(size: s)
+        if let rep = rep, let ctx = NSGraphicsContext(bitmapImageRep: rep) {
+            rep.size = s
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = ctx
+            ctx.imageInterpolation = .high
+            src.draw(in: NSRect(origin: .zero, size: s), from: .zero, operation: .copy, fraction: 1)
+            NSGraphicsContext.restoreGraphicsState()
+            img.addRepresentation(rep)
+        } else {
+            src.size = s
+            return src
+        }
+        return img
+    }
 
     var publisher: String {
         let parts = bundleId.split(separator: ".")
@@ -250,6 +278,7 @@ extension MainWindowController {
             it.name = a.displayName
             it.size = a.shownSize
             it.folderIcon = true
+            if !a.uninstalled { it.icon = a.icon }
             it.path = a.uninstalled ? nil : a.path
             it.category = a.uninstalled ? "" : a.publisher
             it.note = a.uninstalled ? "" : a.version
@@ -285,6 +314,7 @@ extension MainWindowController {
                 c.name = l.kind + ": " + PathUtil.name(l.path)
                 c.size = max(0, l.size)
                 c.folderIcon = l.isDir
+                if !a.uninstalled && l.kind == "App" && PathUtil.same(l.path, a.path) { c.icon = a.icon }
                 c.path = l.path
                 c.category = l.note
                 c.folder = l.path
@@ -297,6 +327,7 @@ extension MainWindowController {
         }
         let filtered = !appSearch.text.trimmingCharacters(in: .whitespaces).isEmpty
         p.setRows(rows, filtered ? "No apps match the search." : "No apps found in " + appSearchRoots.joined(separator: ", ") + ".")
+        loadAppIcons(list)
         if !keep.isEmpty {
             var sel = IndexSet()
             for (i, it) in p.items.enumerated() { if let k = appKey(it), keep.contains(k) { sel.insert(i) } }
@@ -312,6 +343,30 @@ extension MainWindowController {
         p.empty = filtered ? "No apps match." : "No apps found."
         updateButtons()
         if activePage === p { refreshChart() }
+    }
+
+    /// Loads the icons of the listed apps that have none yet, off the main thread, then shows them in the rows.
+    func loadAppIcons(_ list: [InstalledApp]) {
+        let need = list.filter { !$0.uninstalled && $0.icon == nil && !$0.iconRequested }
+        if need.isEmpty { return }
+        for a in need { a.iconRequested = true }
+        let paths = need.map { $0.path }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let icons = paths.map { InstalledApp.loadIcon($0) }
+            DispatchQueue.main.async { [weak self] in
+                for (a, img) in zip(need, icons) { a.icon = img }
+                guard let self = self, let p = self.pApps else { return }
+                var rows = IndexSet()
+                for (i, it) in p.items.enumerated() {
+                    guard let a = it.app, !a.uninstalled, it.icon == nil, let img = a.icon else { continue }
+                    if it.groupOf == nil || (it.leftover?.kind == "App" && PathUtil.same(it.leftover!.path, a.path)) {
+                        it.icon = img
+                        rows.insert(i)
+                    }
+                }
+                if !rows.isEmpty { p.table.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integersIn: 0..<p.table.numberOfColumns)) }
+            }
+        }
     }
 
     private func appKey(_ it: ItemInfo) -> String? {

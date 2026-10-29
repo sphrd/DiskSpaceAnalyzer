@@ -443,6 +443,13 @@ final class SelfTestRun {
             w.pApps.select(IndexSet(integer: 0))
             self.check(w.btnUninstall.isEnabled && w.selectedApp === a, "apps: Uninstall enabled for the selected app")
         }
+        steps.waitUntil(20) { w.pApps.items.first?.icon != nil }
+        steps.then {
+            let head = w.pApps.items.first { $0.app?.bundleId == FakeApp.bundleId && $0.groupOf == nil }
+            let s = head?.icon?.size ?? .zero
+            self.check(head?.icon != nil && head?.icon === head?.app?.icon && s == InstalledApp.iconSize,
+                       "apps: the app row shows the app's own icon (\(Int(s.width))x\(Int(s.height)) pt), not the folder icon")
+        }
         var expected: Int64 = 0
         steps.then {
             // Expanding the app lists the bundle and its 3 leftovers; nothing changes on disk.
