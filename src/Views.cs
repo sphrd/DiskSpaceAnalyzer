@@ -83,11 +83,14 @@ namespace DiskSpaceAnalyzer
             pChanges = BuildChangesPage();
             pBasket = BuildBasketPage();
 
+            // Suggestions is the first tab and the one the app opens on.
+            pages.Remove(pSuggest);
+            pages.Insert(0, pSuggest);
             viewTabs = new TabStrip(pages.Select(p => p.Title).ToArray()) { Dock = DockStyle.Top };
             viewTabs.SelectedIndexChanged += (s, e) => ShowPage();
             viewTabs.SetColor(pages.IndexOf(pSuggest), Theme.SUGGEST);
             foreach (var p in pages) listPanel.Controls.Add(p.Root);
-            pContents.Root.Visible = true;
+            pSuggest.Root.Visible = true;
         }
 
         SizeListView NewList(string[] titles, string[] keys, int[] widths, int barColumn)
@@ -133,12 +136,14 @@ namespace DiskSpaceAnalyzer
             };
             list.HotItemChanged += it =>
             {
-                tips.SetToolTip(list, it != null ? HoverText(it.Tag as ItemInfo) : null);
+                Hover(list, it != null ? HoverText(it.Tag as ItemInfo) : null);
                 if (ActivePage.List != list) return;
                 int i;
                 chart.SetHover(it != null && rowSlice.TryGetValue(it, out i) ? i : -1);
             };
             list.DoubleClick += (s, e) => OnListDoubleClick(p);
+            list.MouseDown += (s, e) => Hover(list, null);
+            list.ScrollChanged += (s, e) => { if (hoverCtl == list && hoverTip != null) hoverTip.Hide(this); };
             list.Enter += (s, e) => lastView = list;
             pages.Add(p);
             return p;
@@ -290,10 +295,61 @@ namespace DiskSpaceAnalyzer
             if (it.IsDir) where = it.Dir.FullPath;
             else if (it.File != null) where = it.File.FullPath;
             else if (it.Targets != null && it.Targets.Count == 1 && it.Targets[0].RecycleBin) where = "Recycle Bin on all drives";
-            else if (it.Targets != null && it.Targets.Count > 1) where = it.Folder;
+            else if (it.Targets != null && it.Targets.Count > 1)
+            {
+                // A suggestion bundling several places: list them all (up to 8).
+                var paths = it.Targets.Select(t => t.RecycleBin ? "Recycle Bin on all drives" : t.Path).ToList();
+                where = string.Join("\n", paths.Take(8)) + (paths.Count > 8 ? string.Format("\n... and {0:N0} more", paths.Count - 8) : "");
+            }
             else where = it.Path ?? it.Folder;
             if (string.IsNullOrEmpty(where) || where == it.Name) return it.Name;
             return it.Name + "\n" + where;
+        }
+
+        // ---- hover tooltip next to the cursor (lists and tree)
+
+        ToolTip hoverTip;
+        System.Windows.Forms.Timer hoverTimer;
+        Control hoverCtl;
+        string hoverText;
+
+        /// <summary>Shows text next to the cursor ~0.45 s after it rests on a new row; null hides it.</summary>
+        void Hover(Control c, string text)
+        {
+            if (hoverTip == null)
+            {
+                hoverTip = new ToolTip { OwnerDraw = true, UseAnimation = false, UseFading = false };
+                hoverTip.Popup += (s, e) =>
+                {
+                    var sz = TextRenderer.MeasureText(hoverText ?? "", Theme.FONT_9, Size.Empty, TextFormatFlags.NoPrefix);
+                    e.ToolTipSize = new Size(sz.Width + S(16), sz.Height + S(10));
+                };
+                hoverTip.Draw += (s, e) => DrawTip(e);
+                hoverTimer = new System.Windows.Forms.Timer { Interval = 450 };
+                hoverTimer.Tick += (s, e) =>
+                {
+                    hoverTimer.Stop();
+                    if (hoverCtl == null || string.IsNullOrEmpty(hoverText) || !hoverCtl.IsHandleCreated) return;
+                    var p = hoverCtl.PointToClient(Cursor.Position);
+                    if (!hoverCtl.ClientRectangle.Contains(p)) return;
+                    // Shown on the form, not the control: a TreeView takes over a tooltip attached to it and sizes it to the row.
+                    var f = PointToClient(Cursor.Position);
+                    hoverTip.Show(hoverText, this, f.X + S(16), f.Y + S(20), 15000);
+                };
+            }
+            if (hoverCtl != null && (hoverCtl != c || hoverText != text)) hoverTip.Hide(this);
+            hoverCtl = c;
+            hoverText = text;
+            hoverTimer.Stop();
+            if (!string.IsNullOrEmpty(text)) hoverTimer.Start();
+        }
+
+        void DrawTip(DrawToolTipEventArgs e)
+        {
+            e.Graphics.Clear(Theme.SURFACE);
+            using (var pen = new Pen(Theme.BORDER)) e.Graphics.DrawRectangle(pen, 0, 0, e.Bounds.Width - 1, e.Bounds.Height - 1);
+            TextRenderer.DrawText(e.Graphics, e.ToolTipText, Theme.FONT_9, new Rectangle(S(8), S(5), e.Bounds.Width - S(16), e.Bounds.Height - S(10)),
+                Theme.FG, TextFormatFlags.NoPrefix | TextFormatFlags.Left);
         }
 
         void ShowFilesSearch()

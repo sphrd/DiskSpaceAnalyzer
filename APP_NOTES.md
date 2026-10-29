@@ -128,6 +128,12 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - 2026-10-29: "after deleting files outside the program, in the suggestion tab i see still the old suggestions even after re
   scanning. Also when hovering show full file name an path."
 
+- 2026-10-29: "suggestions tab: only refresh, select all, deselect all, permanent delete buttons. that it. make these buttons
+  smaller. for the refresh and the rescan put a circular arrow button. app should open in suggestions, put it in the first tab.
+  make the font of the maount that can be freed larger and mke it bold so it pops out more. when hovering on items (both left and
+  middle pane) i still dont see the preview that shows full path and name of the file next to the cursor (or bundled paths for
+  suggestions in different dirs)"
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -246,7 +252,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Since v1.7 this is built in: `.\tools\make_demo.ps1 C:\Demo` (sparse files, ~250 MB on disk, a few duplicate pairs),
   `DiskSpaceAnalyzer.exe --cli screenshot <out> C:\Demo --demo` (finds duplicates first, then shows the folder as
   `E:\ Data` with made-up `F:\`/`G:\` drives; skips Suggestions and Changes, which would show this PC), copy
-  `1-contents.png` to `assets\screenshot.png` and `4-duplicates.png` to `assets\screenshot-duplicates.png`, then
+  `2-contents.png` to `assets\screenshot.png` and `5-duplicates.png` to `assets\screenshot-duplicates.png`, then
   `.\tools\make_demo.ps1 C:\Demo -Remove` and delete `%LOCALAPPDATA%\DiskSpaceAnalyzer\history`.
 - Repo logo: `assets/app.png` at the top of the README; `assets/social-preview.png` is the GitHub social preview
   (Settings > General > Social preview; GitHub has no API for it, so it is uploaded by hand).
@@ -312,7 +318,14 @@ patterns (Part 3) are applied through the WinForms mapping below.
   temp folders change constantly). Ticks are kept by path, expanded suggestions by name.
 - **Gotcha:** live updates ignored every event for 3 s after our own delete, so outside changes in that window were lost.
   Now 0.5 s; re-processing our own echoes is harmless.
-- **Hover:** one owner-drawn dark tooltip (`tips`) for buttons, list rows (name + full path, `HoverText`) and tree nodes.
+- **Hover:** `SetToolTip` on a ListView/TreeView shows once per control entry, not per row, and a TreeView takes over an
+  attached tooltip and sizes it to the row (text cut off). Rows and nodes use `Hover()`: a separate owner-drawn ToolTip shown
+  on the form 16/20 px from the cursor 450 ms after the row changes, hidden on leave/click/scroll. Suggestions in several places
+  list up to 8 paths. Screenshot mode checks it with the real cursor (`*-hover.png`).
+- **Suggestions tab** is first and the app opens on it; bar = circular-arrow refresh (icon button), Select all, Deselect all,
+  Delete permanently (compact 9 pt buttons); headline `<size> can be freed` 15 pt bold in `SUGGEST`. Clicking a tree folder
+  while on Suggestions switches to Contents. **Rescan folder** is a circular-arrow icon button (`RoundButton.Glyph`).
+  Shots are now numbered in tab order: `1-suggestions`, `2-contents`, ... `5-duplicates`.
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
 - **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI

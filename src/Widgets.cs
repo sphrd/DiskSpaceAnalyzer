@@ -13,6 +13,10 @@ namespace DiskSpaceAnalyzer
     {
         public ButtonKind Kind;
         public int MinChars;
+        /// <summary>Smaller button for bars inside a view: 9 pt text, less padding.</summary>
+        public bool Compact;
+        /// <summary>Icon-only button (square): draws this glyph instead of the text, which stays for accessibility.</summary>
+        public Action<Graphics, Rectangle, Color> Glyph;
         bool hover, pressed;
 
         public RoundButton(string text, ButtonKind kind)
@@ -27,9 +31,12 @@ namespace DiskSpaceAnalyzer
 
         public override Size GetPreferredSize(Size proposedSize)
         {
+            var font = Compact ? Theme.FONT_9 : Font;
+            int h = font.Height + Theme.S(Compact ? 10 : 12);
+            if (Glyph != null) return new Size(h, h);
             string sample = MinChars > 0 ? new string('0', MinChars) : Text;
-            int w = TextRenderer.MeasureText(sample, Font, Size.Empty, TextFormatFlags.NoPadding).Width;
-            return new Size(w + Theme.S(32), Font.Height + Theme.S(12));
+            int w = TextRenderer.MeasureText(sample, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+            return new Size(w + Theme.S(Compact ? 20 : 32), h);
         }
 
         protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
@@ -68,8 +75,14 @@ namespace DiskSpaceAnalyzer
             else if (Kind == ButtonKind.Primary) { fill = hover ? Theme.ACCENT_ACTIVE : Theme.ACCENT; fore = Theme.BG; }
             else if (Kind == ButtonKind.Warn) { fill = hover ? Theme.WARN_FG : Theme.WARN; fore = Theme.BG; }
             else { fill = hover ? Theme.SECONDARY_HOVER : Theme.BORDER; fore = Theme.FG; }
-            Theme.FillRound(g, ClientRectangle, Theme.S(8), fill, fill);
-            TextRenderer.DrawText(g, Text, Font, ClientRectangle, fore,
+            Theme.FillRound(g, ClientRectangle, Theme.S(Compact ? 7 : 8), fill, fill);
+            if (Glyph != null)
+            {
+                int s = Math.Min(Width, Height) * 11 / 20;
+                Glyph(g, new Rectangle((Width - s) / 2, (Height - s) / 2, s, s), fore);
+                return;
+            }
+            TextRenderer.DrawText(g, Text, Compact ? Theme.FONT_9 : Font, ClientRectangle, fore,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
                 TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
         }

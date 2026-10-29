@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -38,17 +39,18 @@ namespace DiskSpaceAnalyzer
         bool suggestionsDirty;
         DateTime lastSuggestFind = DateTime.MinValue;
 
-        RoundButton btnSugAdd, btnSugRecycle, btnSugDelete;
+        RoundButton btnSugDelete;
+        Label sugHeadline;
 
         Page BuildSuggestionsPage()
         {
-            var all = Btn("Select all", ButtonKind.Secondary, "Tick every suggestion and every location in it", () => CheckAllSuggestions(true));
-            var none = Btn("Deselect all", ButtonKind.Secondary, "Untick everything", () => CheckAllSuggestions(false));
-            var refresh = Btn("Look again", ButtonKind.Secondary, "Measure the suggestions again", () => { suggestions = null; FillSuggestions(); });
-            btnSugAdd = Btn("Add to delete list", ButtonKind.Secondary, "Put the ticked items on the delete list to review them with the rest", AddCheckedSuggestions);
-            btnSugRecycle = Btn("Move to Recycle Bin", ButtonKind.Secondary, "Move the ticked items to the Recycle Bin (can be undone)", () => DeleteCheckedSuggestions(true));
-            btnSugDelete = Btn("Delete permanently", ButtonKind.Warn, "Delete the ticked items now, bypassing the Recycle Bin", () => DeleteCheckedSuggestions(false));
-            foreach (var b in new[] { btnSugAdd, btnSugRecycle, btnSugDelete }) b.Tag = "right";
+            var refresh = Btn("Refresh", ButtonKind.Secondary, "Look for space that can be freed again", () => { suggestionsDirty = true; FillSuggestions(); });
+            refresh.Glyph = Theme.DrawRefresh;
+            var all = Btn("Select all", ButtonKind.Secondary, "Check every suggestion and every location in it", () => CheckAllSuggestions(true));
+            var none = Btn("Deselect all", ButtonKind.Secondary, "Uncheck everything", () => CheckAllSuggestions(false));
+            btnSugDelete = Btn("Delete permanently", ButtonKind.Warn, "Delete the checked items now, bypassing the Recycle Bin (Ctrl+Shift+D)", () => DeleteCheckedSuggestions(false));
+            btnSugDelete.Tag = "right";
+            foreach (var b in new[] { refresh, all, none, btnSugDelete }) b.Compact = true;
             var list = NewList(new[] { "Name", "Size", "% of suggestions", "Location", "What deleting means" },
                 new[] { "name", "size", "size", "folder", "note" }, new[] { 260, 90, 150, 300, 420 }, 2);
             list.GlyphClicked += SuggestionGlyph;
@@ -57,7 +59,15 @@ namespace DiskSpaceAnalyzer
                 if (e.KeyCode == Keys.Space) { ToggleSelectedSuggestions(); e.Handled = true; }
                 else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.Left) { ExpandSelectedSuggestions(e.KeyCode == Keys.Right); e.Handled = true; }
             };
-            var p = AddPage("Suggestions", list, MakeBar(all, none, refresh, btnSugAdd, btnSugRecycle, btnSugDelete));
+            var p = AddPage("Suggestions", list, MakeBar(refresh, all, none, btnSugDelete));
+            // The amount that can be freed, large and bold in the tab's colour, above the caption.
+            sugHeadline = new Label
+            {
+                Dock = DockStyle.Top, AutoSize = false, UseMnemonic = false, Font = Theme.FONT_HEADLINE, ForeColor = Theme.SUGGEST,
+                BackColor = Theme.SURFACE, Height = Theme.FONT_HEADLINE.Height + S(6), TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(S(2), 0, 0, 0)
+            };
+            p.Root.Controls.Add(sugHeadline);
             p.ChartTitle = "Cleanup suggestions";
             p.ChartScope = "of the suggestions";
             p.Empty = "Nothing to suggest.";
@@ -82,6 +92,7 @@ namespace DiskSpaceAnalyzer
                 }
             int gen = ++suggestGen;
             p.Caption.Text = "Looking for space that can be freed...";
+            if (sugHeadline != null && suggestions == null) sugHeadline.Text = "Looking...";
             SetRows(p.List, new List<ListViewItem>(), "Looking for space that can be freed...");
             UpdateSuggestionButtons();
             var scanned = roots.Where(r => r.Node != null).Select(r => r.Node).ToList();
@@ -148,9 +159,10 @@ namespace DiskSpaceAnalyzer
                 foreach (ListViewItem it in lv.Items)
                     if (((ItemInfo)it.Tag).Name == top) { try { lv.TopItem = it; } catch (Exception) { } break; }
             var ticked = CheckedSuggestionTargets();
-            p.Caption.Text = rows.Count == 0 ? "Nothing to suggest." : string.Format(
-                "{0} can probably be freed. Checked: {1:N0} item{2}, {3}.  White: safe, rebuilt or downloaded again when needed.  Amber: review first.",
-                Fmt.Size(total), ticked.Count, ticked.Count == 1 ? "" : "s", Fmt.Size(ticked.Sum(t => t.Size)));
+            sugHeadline.Text = rows.Count == 0 ? "Nothing to free" : Fmt.Size(total) + " can be freed";
+            p.Caption.Text = rows.Count == 0 ? "No caches, temporary files or leftovers worth deleting were found." : string.Format(
+                "Checked: {0:N0} item{1}, {2}.  White: safe, rebuilt or downloaded again when needed.  Amber: review first.",
+                ticked.Count, ticked.Count == 1 ? "" : "s", Fmt.Size(ticked.Sum(t => t.Size)));
             p.ChartSub = Fmt.Size(total) + " can be freed";
             p.ChartTotal = 0;
             UpdateSuggestionButtons();
@@ -165,10 +177,8 @@ namespace DiskSpaceAnalyzer
 
         void UpdateSuggestionButtons()
         {
-            if (btnSugAdd == null) return;
-            bool any = CheckedSuggestionTargets().Count > 0;
-            btnSugAdd.Enabled = any && !busy;
-            btnSugRecycle.Enabled = btnSugDelete.Enabled = any && !busy && !scanning;
+            if (btnSugDelete == null) return;
+            btnSugDelete.Enabled = CheckedSuggestionTargets().Count > 0 && !busy && !scanning;
         }
 
         void SuggestionGlyph(ListViewItem lvi, bool checkbox)

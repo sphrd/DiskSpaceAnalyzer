@@ -64,6 +64,43 @@ namespace DiskSpaceAnalyzer
             }
         }
 
+        /// <summary>Moves the real cursor onto a row (the first multi-location suggestion, else the first file, else row 2) and
+        /// captures the screen around it, so the hover tooltip is checked the way a user sees it.</summary>
+        async Task HoverShot(Control c, string name)
+        {
+            Point at;
+            var lv = c as SizeListView;
+            if (lv != null)
+            {
+                var items = lv.Items.Cast<ListViewItem>().ToList();
+                var row = items.FirstOrDefault(x => x.Tag is ItemInfo && ((ItemInfo)x.Tag).Targets != null && ((ItemInfo)x.Tag).Targets.Count > 1)
+                    ?? items.FirstOrDefault(x => x.Tag is ItemInfo && ((ItemInfo)x.Tag).File != null) ?? items.Skip(1).FirstOrDefault();
+                if (row == null) return;
+                var rb = lv.GetItemRect(row.Index);
+                at = lv.PointToScreen(new Point(rb.X + S(90), rb.Y + rb.Height / 2));
+            }
+            else
+            {
+                var tv = (TreeView)c;
+                var n = tv.SelectedNode != null && tv.SelectedNode.Nodes.Count > 0 ? tv.SelectedNode.Nodes[0] : tv.SelectedNode;
+                if (n == null) return;
+                at = tv.PointToScreen(new Point(n.Bounds.X + S(20), n.Bounds.Y + n.Bounds.Height / 2));
+            }
+            Activate();
+            Cursor.Position = new Point(at.X - S(30), at.Y);
+            await Task.Delay(150);
+            Cursor.Position = at;
+            await Task.Delay(1400);
+            var area = new Rectangle(at.X - S(120), at.Y - S(40), S(760), S(240));
+            using (var bmp = new Bitmap(area.Width, area.Height))
+            {
+                using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(area.X, area.Y, 0, 0, bmp.Size);
+                bmp.Save(Path.Combine(ShotDir, name + ".png"), ImageFormat.Png);
+            }
+            Cursor.Position = new Point(Left - S(20), Top - S(20));
+            await Task.Delay(300);
+        }
+
         async void RunShots()
         {
             try
@@ -76,25 +113,8 @@ namespace DiskSpaceAnalyzer
                     for (int k = 0; k < 600 && dupeFinder != null; k++) await Task.Delay(200);
                     MakeDemoDrive();
                 }
-                await Task.Delay(1500);
-                if (ShotDemo) ClearHover();
-                SaveShot("1-contents");
-                // The hover tooltip is its own window: show it on the first file row and capture that part of the screen.
-                var row = contents.Items.Cast<ListViewItem>().FirstOrDefault(x => x.Tag is ItemInfo && ((ItemInfo)x.Tag).File != null) ?? (contents.Items.Count > 0 ? contents.Items[0] : null);
-                if (row != null && !ShotDemo)
-                {
-                    var rb = contents.GetItemRect(row.Index);
-                    tips.Show(HoverText((ItemInfo)row.Tag), contents, rb.X + S(40), rb.Bottom + S(4), 5000);
-                    await Task.Delay(700);
-                    var origin = contents.PointToScreen(new Point(rb.X, rb.Y));
-                    using (var bmp = new Bitmap(S(700), S(110)))
-                    {
-                        using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(origin.X, origin.Y, 0, 0, bmp.Size);
-                        bmp.Save(Path.Combine(ShotDir, "1b-hover-tooltip.png"), ImageFormat.Png);
-                    }
-                    tips.Hide(contents);
-                }
-                for (int i = 1; i < pages.Count; i++)
+                // One shot per tab, in tab order (Suggestions first), plus hover shots with the real cursor.
+                for (int i = 0; i < pages.Count; i++)
                 {
                     var p = pages[i];
                     if (ShotDemo && (p == pSuggest || p == pChanges)) continue;   // they would show this computer
@@ -109,16 +129,18 @@ namespace DiskSpaceAnalyzer
                     }
                     if (p == pSuggest)
                     {
-                        for (int k = 0; k < 300 && suggestions == null; k++) await Task.Delay(200);
+                        for (int k = 0; k < 300 && (suggestions == null || suggestionsDirty); k++) await Task.Delay(200);
                         var first = suggestions.Where(x => x.Size > 0 && x.Targets.Count > 1).OrderByDescending(x => x.Size).FirstOrDefault()
                             ?? suggestions.Where(x => x.Size > 0).OrderByDescending(x => x.Size).FirstOrDefault();
                         if (first != null) { first.Expanded = true; ShowSuggestions(); }
                     }
-                    await Task.Delay(2000);
+                    await Task.Delay(i == 0 ? 2500 : 2000);
                     if (ShotDemo) ClearHover();
-                    SaveShot((i + 1) + "-" + p.Title.Split(' ')[0].ToLowerInvariant());
+                    string name = (i + 1) + "-" + p.Title.Split(' ')[0].ToLowerInvariant();
+                    SaveShot(name);
+                    if (!ShotDemo && (p == pContents || p == pSuggest)) await HoverShot(p.List, name + "-hover");
                 }
-                viewTabs.SelectedIndex = 0;
+                if (!ShotDemo) await HoverShot(tree, "tree-hover");                viewTabs.SelectedIndex = pages.IndexOf(pContents);
                 measure.SelectedIndex = 0;
                 await Task.Delay(1500);
                 SaveShot((pages.Count + 1) + "-file-size");
@@ -274,6 +296,9 @@ namespace DiskSpaceAnalyzer
                 var dupFile = Scanner.ListFiles(FindScanned(P("C"), true)).First(f => f.Name == "dup1.bin");
                 string ft = HoverText(ItemInfo.ForFile(dupFile, 0)), dt = HoverText(ItemInfo.ForDir(FindScanned(P("C"), true), 0));
                 check(ft == "dup1.bin\n" + P(@"C\dup1.bin") && dt == "C\n" + P("C"), "hover: full name and path for files and folders");
+                var bundle = new ItemInfo { Name = "Test cache", Targets = Enumerable.Range(1, 10).Select(k => new DeleteTarget { Path = P("c" + k), IsDir = true }).ToList(), Folder = "10 locations" };
+                string bt = HoverText(bundle);
+                check(bt.StartsWith("Test cache\n" + P("c1") + "\n" + P("c2")) && bt.EndsWith("... and 2 more"), "hover: a suggestion in several places lists its paths");
 
                 // Suggestions are found again after a change outside the app (v1.7.2 kept the old list).
                 suggestions = null;
@@ -290,7 +315,7 @@ namespace DiskSpaceAnalyzer
                 check(hadNm && suggestions != before2 && !suggestions.Any(s2 => s2.Name == "node_modules folders"),
                     "suggestions: found again after an outside delete (node_modules gone)" + string.Format(" [before {0}, new list {1}, still there {2}, {3}]",
                         hadNm, suggestions != before2, suggestions != null && suggestions.Any(s2 => s2.Name == "node_modules folders"), diag));
-                viewTabs.SelectedIndex = 0;
+                viewTabs.SelectedIndex = pages.IndexOf(pContents);
             }
             catch (Exception ex) { check(false, "exception: " + ex); }
             try { File.WriteAllText(dir + ".log", log.ToString()); } catch (Exception) { }

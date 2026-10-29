@@ -46,12 +46,13 @@ open list, and hovering a slice highlights its row and the other way round)
   disk images, installers...).
 - **Duplicates:** files with identical content; **Select extra copies** keeps
   the newest of each group.
-- **Suggestions:** space that can usually be freed, each with what deleting it
-  means: the Recycle Bin / Trash, temporary files, caches (browsers, developer
-  tools, Xcode, Homebrew...), `node_modules` folders, old installers in Downloads,
-  and more. Expand a suggestion to see every location, tick exactly what you want
-  (**Select all** / **Deselect all**), and delete it right there or add it to the
-  delete list. Safe items start ticked; items to review first start unticked.
+- **Suggestions** (the first tab, where the app opens): how much can be freed, in
+  large print, and what: the Recycle Bin / Trash, temporary files, caches
+  (browsers, developer tools, Xcode, Homebrew...), `node_modules` folders, old
+  installers in Downloads, and more, each with what deleting it means. Expand a
+  suggestion to see every location, check exactly what you want (**Select all** /
+  **Deselect all**) and **Delete permanently** right there. Safe items start
+  checked; items to review first start unchecked.
   Suggestions are looked up again whenever the disk changes or you rescan.
 - Hover any row or folder to see its full name and path.
 - **Changes:** which folders grew or shrank since the previous scan.
@@ -122,10 +123,10 @@ or later.
 |---|---|---|
 | Open the selected folder or file | <kbd>Enter</kbd> | <kbd>Return</kbd> |
 | Up to the parent folder | <kbd>Backspace</kbd> | <kbd>⌘</kbd><kbd>↑</kbd> |
-| Rescan the selected folder | <kbd>F5</kbd> | <kbd>⌘</kbd><kbd>R</kbd> |
+| Rescan the selected folder (circular arrow button) | <kbd>F5</kbd> | <kbd>⌘</kbd><kbd>R</kbd> |
 | Add to the delete list | <kbd>Ctrl</kbd>+<kbd>D</kbd> | <kbd>⌘</kbd><kbd>D</kbd> |
 | Delete permanently | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> (or <kbd>Del</kbd>) | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>D</kbd> (or <kbd>⌘</kbd><kbd>⌫</kbd>) |
-| Tick / untick in Suggestions | <kbd>Space</kbd> | <kbd>Space</kbd> |
+| Check / uncheck in Suggestions | <kbd>Space</kbd> | <kbd>Space</kbd> |
 | Search files | <kbd>Ctrl</kbd>+<kbd>F</kbd> | <kbd>⌘</kbd><kbd>F</kbd> |
 | Copy path | <kbd>Ctrl</kbd>+<kbd>C</kbd> | right-click menu |
 | Export | | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>E</kbd> |

@@ -118,6 +118,7 @@ namespace DiskSpaceAnalyzer
             btnAdmin.Visible = !isAdmin;
             btnUp = Btn("Up", ButtonKind.Secondary, "Go to the parent folder (Backspace)", GoUp);
             btnRescan = Btn("Rescan folder", ButtonKind.Secondary, "Rescan the selected folder (F5)", RescanSelected);
+            btnRescan.Glyph = Theme.DrawRefresh;
             btnExplorer = Btn("Show in Explorer", ButtonKind.Secondary, "Open the selected item in Windows Explorer", ShowInExplorer);
             btnAddList = Btn("Add to delete list", ButtonKind.Secondary, "Collect the selected items in the delete list; review them there, then delete them together (Ctrl+D)", AddSelectionToBasket);
             btnDelete = Btn("Delete permanently", ButtonKind.Warn, "Permanently delete the selected items, bypassing the Recycle Bin (Ctrl+Shift+D)", DeleteSelected);
@@ -179,7 +180,12 @@ namespace DiskSpaceAnalyzer
                 if (d != null) ShowContents(d);
                 else if (e.Node.Tag is ScanRoot) ShowUnscanned((ScanRoot)e.Node.Tag);
             };
-            tree.NodeMouseClick += (s, e) => { if (e.Button == MouseButtons.Right) tree.SelectedNode = e.Node; };
+            tree.NodeMouseClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Right) tree.SelectedNode = e.Node;
+                // Clicking a folder while Suggestions is open means "show me this folder".
+                else if (e.Button == MouseButtons.Left && ActivePage == pSuggest && e.Node.Tag is DirNode) viewTabs.SelectedIndex = pages.IndexOf(pContents);
+            };
             TreeNode tipNode = null;
             tree.MouseMove += (s, e) =>
             {
@@ -188,9 +194,10 @@ namespace DiskSpaceAnalyzer
                 tipNode = n;
                 var d = n != null ? n.Tag as DirNode : null;
                 var r = n != null ? n.Tag as ScanRoot : null;
-                tips.SetToolTip(tree, d != null ? d.Name.TrimEnd('\\') + "\n" + d.FullPath : r != null ? r.DisplayName + "\n" + r.Path : null);
+                Hover(tree, d != null ? d.Name.TrimEnd('\\') + "\n" + d.FullPath : r != null ? r.DisplayName + "\n" + r.Path : null);
             };
-            tree.MouseLeave += (s, e) => tipNode = null;
+            tree.MouseLeave += (s, e) => { tipNode = null; Hover(tree, null); };
+            tree.MouseDown += (s, e) => Hover(tree, null);
             tree.NodeMouseDoubleClick += (s, e) => { var r = e.Node.Tag as ScanRoot; if (r != null) ScanPath(r.Path); };
             tree.Enter += (s, e) => lastView = tree;
             // Samples are the widest expected value or the header title, whichever is wider.
@@ -330,6 +337,7 @@ namespace DiskSpaceAnalyzer
                 split2.SplitterDistance = Math.Max(S(200), split2.Width - chartW - split2.SplitterWidth);
                 LoadDrives();
                 RefreshTree(null);
+                ShowPage();
                 // The system drive is analyzed automatically; other drives are listed and scanned on demand.
                 if (!string.IsNullOrEmpty(initialPath)) ScanPath(initialPath);
                 else ScanPath(Path.GetPathRoot(Environment.SystemDirectory));
@@ -1133,7 +1141,7 @@ namespace DiskSpaceAnalyzer
             if (lastView != contents && IsAttached(it.File.Dir))
             {
                 SelectDir(it.File.Dir);
-                viewTabs.SelectedIndex = 0;
+                viewTabs.SelectedIndex = pages.IndexOf(pContents);
                 foreach (ListViewItem lvi in contents.Items)
                 {
                     var c = (ItemInfo)lvi.Tag;

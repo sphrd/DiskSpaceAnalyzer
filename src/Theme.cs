@@ -46,6 +46,7 @@ namespace DiskSpaceAnalyzer
         public static readonly Font FONT_11 = new Font("Segoe UI", 11f);
         public static readonly Font FONT_9 = new Font("Segoe UI", 9f);
         public static readonly Font FONT_BOLD = new Font("Segoe UI", 10f, FontStyle.Bold);
+        public static readonly Font FONT_HEADLINE = new Font("Segoe UI", 15f, FontStyle.Bold);
 
         public static float Scale = 1f;
 
@@ -104,6 +105,32 @@ namespace DiskSpaceAnalyzer
             using (var b = new SolidBrush(Color.FromArgb(a, LOGO_TOP_LEFT))) g.FillPie(b, circle, 180 + mouth, 90 - mouth + under);
             using (var b = new SolidBrush(Color.FromArgb(a, LOGO_BOTTOM_LEFT))) g.FillPie(b, circle, 90 - under, 90 - mouth + under);
             using (var b = new SolidBrush(Color.FromArgb(a, LOGO_RIGHT))) g.FillPie(b, circle, -90, 180);
+        }
+
+        /// <summary>Circular arrow (refresh / rescan): a ~300° arc open at the top right, with an arrowhead at its end.</summary>
+        public static void DrawRefresh(Graphics g, Rectangle r, Color c)
+        {
+            var sm = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float w = Math.Max(1.6f, 1.8f * Scale);
+            var arc = RectangleF.Inflate(r, -w, -w);
+            using (var pen = new Pen(c, w) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawArc(pen, arc, -60, 300);
+            // Arrowhead at the arc's end (11 o'clock), pointing on along the arc (clockwise).
+            double a = (-60 + 300) * Math.PI / 180;
+            float cx = arc.X + arc.Width / 2, cy = arc.Y + arc.Height / 2, rad = arc.Width / 2;
+            float ex = cx + rad * (float)Math.Cos(a), ey = cy + rad * (float)Math.Sin(a);
+            float tx = -(float)Math.Sin(a), ty = (float)Math.Cos(a);      // tangent, clockwise
+            float nx = (float)Math.Cos(a), ny = (float)Math.Sin(a);       // outward normal
+            float s = r.Width * 0.30f;
+            using (var b = new SolidBrush(c))
+                g.FillPolygon(b, new[]
+                {
+                    new PointF(ex + tx * s, ey + ty * s),
+                    new PointF(ex + nx * s * 0.75f, ey + ny * s * 0.75f),
+                    new PointF(ex - nx * s * 0.75f, ey - ny * s * 0.75f)
+                });
+            g.SmoothingMode = sm;
         }
 
         public static void DrawFolder(Graphics g, Rectangle r, Color c)
