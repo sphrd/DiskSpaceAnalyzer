@@ -334,18 +334,18 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Delete permanently (compact 9 pt buttons); headline `<size> can be freed` 15 pt bold in `SUGGEST`. Clicking a tree folder
   while on Suggestions switches to Contents. **Rescan folder** is a circular-arrow icon button (`RoundButton.Glyph`).
   Shots are numbered in tab order: `1-contents`, `2-suggestions`, ... `5-duplicates`.
-- **Apps tab (`Apps.cs`):** uninstall entries from HKLM 64/32 and HKCU (skips SystemComponent, updates with ParentKeyName or`r
-  ReleaseType Update/Hotfix), plus Store apps via `Get-AppxPackage` (SignatureKind Store, not framework/non-removable; name from`r
-  AppxManifest DisplayName). Size = measured program folder (scan index first), else EstimatedSize; apps sharing one folder (Office`r
-  and language packs) count it once (on the entry with the largest EstimatedSize). Uninstall: MSI `msiexec /x {code}`, else the`r
-  UninstallString (shell execute so UAC works), Store `Remove-AppxPackage`; waits for the process, then until the uninstall key is`r
-  gone (NSIS/Inno hand over to a temp copy), overlay button **Continue** to stop waiting. Leftovers: folders in Roaming, Local,`r
-  LocalLow, Local\Programs, ProgramData, Program Files (x86), Documents, Store Packages; Start menu/desktop shortcuts; registry`r
-  Software\<App> and Software\<Publisher>\<App> (HKCU, HKLM 64/32), the uninstall key if left. Names: normalised display name,`r
-  name without version/bitness, folder name, key name (`_is1` stripped); generic words never match; a publisher folder only when`r
-  all it holds is the app. Admin-only items start unchecked without elevation. Registry keys: `reg export` appended to`r
-  `%LOCALAPPDATA%\DiskSpaceAnalyzer\registry-backups\<app> <date>.reg` before `DeleteSubKeyTree`; a key that can't be backed up is kept.`r
-- **Gotcha:** `Directory.GetDirectories` on .NET 4 (no 4.6.2 target) rejects `\\?\` paths; the leftover search silently found`r
+- **Apps tab (`Apps.cs`):** uninstall entries from HKLM 64/32 and HKCU (skips SystemComponent, updates with ParentKeyName or
+  ReleaseType Update/Hotfix), plus Store apps via `Get-AppxPackage` (SignatureKind Store, not framework/non-removable; name from
+  AppxManifest DisplayName). Size = measured program folder (scan index first), else EstimatedSize; apps sharing one folder (Office
+  and language packs) count it once (on the entry with the largest EstimatedSize). Uninstall: MSI `msiexec /x {code}`, else the
+  UninstallString (shell execute so UAC works), Store `Remove-AppxPackage`; waits for the process, then until the uninstall key is
+  gone (NSIS/Inno hand over to a temp copy), overlay button **Continue** to stop waiting. Leftovers: folders in Roaming, Local,
+  LocalLow, Local\Programs, ProgramData, Program Files (x86), Documents, Store Packages; Start menu/desktop shortcuts; registry
+  Software\<App> and Software\<Publisher>\<App> (HKCU, HKLM 64/32), the uninstall key if left. Names: normalised display name,
+  name without version/bitness, folder name, key name (`_is1` stripped); generic words never match; a publisher folder only when
+  all it holds is the app. Admin-only items start unchecked without elevation. Registry keys: `reg export` appended to
+  `%LOCALAPPDATA%\DiskSpaceAnalyzer\registry-backups\<app> <date>.reg` before `DeleteSubKeyTree`; a key that can't be backed up is kept.
+- **Gotcha:** `Directory.GetDirectories` on .NET 4 (no 4.6.2 target) rejects `\\?\` paths; the leftover search silently found
   nothing until it used plain paths (these roots are short).
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
