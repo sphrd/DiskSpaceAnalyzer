@@ -333,3 +333,6 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - v1.7.1 (2026-10-28): fix a crash in live updates on paths longer than 260 characters; About shows the speed tip and
   the keyboard shortcuts; scan history keeps only the last scan of the 10 most recent drives/folders; the chart centre
   names the folder and goes up on click; size on disk is the default; the logo morph is visible again after big scans.
+- v1.7.2 (2026-10-29): macOS never downloads iCloud files or folders (dataless items are skipped, materialization off),
+  first-run Full Disk Access prompt and no per-folder prompts without it, dmg with a drag-to-Applications arrow; square chart
+  pane on both platforms; README rewritten.

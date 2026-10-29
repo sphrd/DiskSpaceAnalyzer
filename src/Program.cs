@@ -7,8 +7,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Fast disk space analyzer and cleaner for Windows")]
 [assembly: AssemblyProduct("Disk Space Analyzer")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 sphrd - MIT License")]
-[assembly: AssemblyVersion("1.7.1.0")]
-[assembly: AssemblyFileVersion("1.7.1.0")]
+[assembly: AssemblyVersion("1.7.2.0")]
+[assembly: AssemblyFileVersion("1.7.2.0")]
 
 namespace DiskSpaceAnalyzer
 {
