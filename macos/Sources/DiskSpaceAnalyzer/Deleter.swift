@@ -93,7 +93,10 @@ final class DeleteJob {
 
     private func deleteTree(_ dir: String) {
         current = dir
-        if let names = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+        // A folder not downloaded from iCloud cannot be listed while downloads are off; allow fetching its names here
+        // (the files inside stay in the cloud and are only removed).
+        let list = { try? FileManager.default.contentsOfDirectory(atPath: dir) }
+        if let names = Dataless.isDataless(dir) ? Dataless.allowingDownloads(list) : list() {
             for n in names {
                 let p = PathUtil.join(dir, n)
                 var st = stat()

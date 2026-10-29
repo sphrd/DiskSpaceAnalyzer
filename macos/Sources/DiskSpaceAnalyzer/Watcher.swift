@@ -124,10 +124,19 @@ extension MainWindowController {
         var added: [String] = []
         var structure = false
         var seen = Set<String>()
+        var revive: [DirNode] = []
         func refresh(_ d: DirNode) { if fileIds.insert(ObjectIdentifier(d)).inserted { files.append(d) } }
         for p0 in batch {
             let p = PathUtil.trim(p0)
             if !seen.insert(p).inserted { continue }
+            // Nothing inside a folder the scan did not enter is read: it would download it or make macOS ask for access.
+            // A folder that was not downloaded and now is (opened in Finder) is scanned.
+            if let holder = findScanned(p, exact: false), holder.insideSkipped {
+                let hp = holder.fullPath
+                if holder.skipped == .notDownloaded && PathUtil.isDir(hp) && !Dataless.isDataless(hp)
+                    && !revive.contains(where: { $0 === holder }) { revive.append(holder) }
+                continue
+            }
             let node = findScanned(p, exact: true)
             let exists = PathUtil.exists(p)
             if let n = node, n.parent == nil { if exists { refresh(n) }; continue }   // the scanned root itself
@@ -152,6 +161,10 @@ extension MainWindowController {
             fresh.modified = Int64(Date().timeIntervalSince1970)
             parent.children.append(fresh)
             parent.addUp(fresh.bytes, fresh.alloc, fresh.files, fresh.dirs + 1)
+        }
+        for d in revive where isAttached(d) && d.parent != nil {
+            replaceNode(d, Scanner().run(d.fullPath))
+            structure = true
         }
         if !files.isEmpty || !added.isEmpty || structure {
             livePending = true

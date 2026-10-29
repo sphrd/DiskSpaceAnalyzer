@@ -132,7 +132,9 @@ extension MainWindowController {
         let dl = Suggestion("Old installers in Downloads", safe: false, note: "Disk images, installer packages and archives older than 30 days. Keep the ones you still need.")
         let downloads = home + "/Downloads"
         let cutoff = Date().addingTimeInterval(-30 * 86400)
-        for p in DeleteJob.children(downloads) {
+        // Without Full Disk Access, listing Downloads makes macOS ask; only look when a scan has read it already.
+        let mayList = FullDiskAccess.granted || (findScanned(downloads, exact: true).map { !$0.insideSkipped && $0.fileList != nil } ?? false)
+        for p in mayList ? DeleteJob.children(downloads) : [] {
             let ext = (p as NSString).pathExtension.lowercased()
             guard ["dmg", "pkg", "zip"].contains(ext), let a = try? FileManager.default.attributesOfItem(atPath: p),
                   (a[.type] as? FileAttributeType) == .typeRegular,

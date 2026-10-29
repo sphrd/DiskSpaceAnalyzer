@@ -4,6 +4,8 @@
 #   - the version comes from src/Program.cs (AssemblyVersion), so both platforms always share one version
 #   - the colour tokens, including the logo colours, are generated from src/Theme.cs (macos/gen_tokens.py)
 #   - the icon is made from assets/app-1024.png (written by tools/make_icon.ps1)
+#   - the dmg layout (background with an arrow to Applications) comes from dmg_art.swift and dmg_settings.py; dmgbuild
+#     is installed into build/venv (needs internet access the first time)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -33,11 +35,17 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 # Ad-hoc signature (no Apple Developer ID): required for Apple Silicon; first launch needs right-click > Open.
 codesign --force --deep --sign - "$APP"
 
-STAGE=build/dmg
-mkdir -p "$STAGE"
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
+# Disk image: the app on the left, a link to Applications on the right, and a background with an arrow from the app to
+# Applications ("Drag to Applications"). dmgbuild (Python) writes the Finder layout (.DS_Store) itself, so no Finder
+# automation is needed (AppleScript fails or times out on CI runners). The background has a 1x and a 2x version.
+xcrun swiftc -O -o build/dmg_art dmg_art.swift
+build/dmg_art background build/dmg-background.png 1
+build/dmg_art background build/dmg-background@2x.png 2
+tiffutil -cathidpicheck build/dmg-background.png build/dmg-background@2x.png -out build/background.tiff
+python3 -m venv build/venv
+build/venv/bin/pip install -q --disable-pip-version-check dmgbuild
 rm -f ../DiskSpaceAnalyzer-macOS.dmg
-hdiutil create -volname "Disk Space Analyzer" -srcfolder "$STAGE" -ov -format UDZO ../DiskSpaceAnalyzer-macOS.dmg >/dev/null
+build/venv/bin/dmgbuild -s dmg_settings.py -D app="$APP" -D background=build/background.tiff \
+    -D icon="$APP/Contents/Resources/AppIcon.icns" "Disk Space Analyzer" ../DiskSpaceAnalyzer-macOS.dmg
 
 echo "Built $APP ($(lipo -archs "$APP/Contents/MacOS/DiskSpaceAnalyzer")) and DiskSpaceAnalyzer-macOS.dmg ($(du -h ../DiskSpaceAnalyzer-macOS.dmg | cut -f1))"

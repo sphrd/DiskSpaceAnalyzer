@@ -89,6 +89,19 @@ jobs:
       - name: Build universal app and dmg
         run: bash macos/build.sh
 
+      - name: Check dmg layout (background, arrow, Applications link)
+        run: |
+          MNT="$RUNNER_TEMP/dmg-mount"
+          mkdir -p "$RUNNER_TEMP/shots"
+          hdiutil attach -readonly -noautoopen -mountpoint "$MNT" DiskSpaceAnalyzer-macOS.dmg
+          ls -la "$MNT" "$MNT/.background"
+          macos/build/venv/bin/python macos/dmg_check.py "$MNT" macos/build/dmg_art "$RUNNER_TEMP/shots/dmg-layout.png"
+          # A real Finder window too, when the runner allows screen captures.
+          open "$MNT" || true
+          sleep 5
+          screencapture -x "$RUNNER_TEMP/shots/dmg-finder.png" || true
+          hdiutil detach "$MNT" || hdiutil detach -force "$MNT"
+
       - name: Headless self-check
         run: |
           BIN="macos/build/Disk Space Analyzer.app/Contents/MacOS/DiskSpaceAnalyzer"

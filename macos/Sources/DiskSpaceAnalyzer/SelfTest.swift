@@ -87,6 +87,21 @@ final class SelfTestRun {
         steps.then {
             let top = self.root
             self.check(top != nil && top!.files == 9 && top!.dirs == 8, "scan: \(top?.files ?? -1) files, \(top?.dirs ?? -1) folders (expected 9, 8)")
+            // iCloud items are never downloaded: the process-wide policy is set at start-up.
+            self.check(Dataless.policyResult == 0 && Dataless.processPolicy == Dataless.materializeOff,
+                       "iopolicy: setiopolicy_np(materialize dataless files, process, off) returned \(Dataless.policyResult) (errno \(Dataless.policyErrno)), policy now \(Dataless.processPolicy)")
+            // Protected folders: listed, not entered (D stands in for one).
+            let s = Scanner()
+            s.alsoBlocked = [self.P("D")]
+            let r = s.run(self.dir)
+            let d = r.child("D")
+            self.check(d != nil && d!.skipped == .needsAccess && d!.files == 0 && d!.displayName.hasSuffix("[needs Full Disk Access]") && r.files == 8 && r.dirs == 8,
+                       "protected folder listed but not entered (\(r.files) files, \(r.dirs) folders; expected 8, 8)")
+            let granted = FullDiskAccess.granted
+            let blocked = FullDiskAccess.blocked(for: "/")
+            let desktop = PathUtil.home + "/Desktop"
+            self.check(granted ? blocked.isEmpty : (blocked.contains(desktop) && !FullDiskAccess.blocked(for: desktop).contains(desktop)),
+                       "Full Disk Access \(granted ? "granted" : "not granted"): \(blocked.count) protected folders skipped in a scan of /")
             // Live updates: a new file and a new folder appear without a rescan.
             FileManager.default.createFile(atPath: self.P("A/new.txt"), contents: Data(count: 5000))
             try? FileManager.default.createDirectory(atPath: self.P("E/deep"), withIntermediateDirectories: true)
@@ -228,6 +243,9 @@ final class ShotRun {
         let w = app.main!
         steps.wait(1.5)
         steps.then { self.shot("1-contents") }
+        steps.then {
+            print("panes: tree \(Int(w.treePanel.frame.width)), list \(Int(w.listPanel.frame.width)), chart \(Int(w.chartPanel.frame.width)) x \(Int(w.chartPanel.frame.height)), window \(Int(w.window?.frame.width ?? 0)) x \(Int(w.window?.frame.height ?? 0))")
+        }
         for i in 1..<w.pages.count {
             let p = w.pages[i]
             if p === w.pBasket {
@@ -270,7 +288,16 @@ final class ShotRun {
         steps.wait(6)
         steps.then {
             if let win = NSApp.windows.first(where: { $0.title == "Disk Space Analyzer - updates" }), let v = win.contentView { self.save(v, "\(w.pages.count + 4)-update") }
+            let d = FullDiskAccessWindow(onDone: {})
+            self.fda = d
+            d.present(over: w.window)
+        }
+        steps.wait(0.6)
+        steps.then {
+            if let v = self.fda?.window?.contentView { self.save(v, "\(w.pages.count + 5)-full-disk-access") }
+            self.fda?.close()
         }
         steps.run { exit(0) }
     }
+    private var fda: FullDiskAccessWindow?
 }

@@ -5,7 +5,8 @@ import AppKit
 //   DiskSpaceAnalyzer <folder>             opens the window and scans <folder>
 //   DiskSpaceAnalyzer --cli scan <folder>  headless scan, prints totals (same format as the Windows exe)
 //   DiskSpaceAnalyzer --cli screenshot <out-folder> <folder>
-//                                          opens the window, scans, saves a PNG of every view, About and the update window
+//                                          opens the window, scans, saves a PNG of every view, About, the update window
+//                                          and the Full Disk Access dialog
 //   DiskSpaceAnalyzer --cli selftest <scratch-folder>
 //                                          end-to-end self-test of the real window; writes <scratch-folder>.log, exit code 0 = passed
 
@@ -31,6 +32,7 @@ extension String {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var main: MainWindowController!
     var about: AboutWindow?
+    var fullDiskAccess: FullDiskAccessWindow?
     let initialPath: String?
     let screenshotDir: String?
     let selfTestDir: String?
@@ -59,6 +61,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.test = t
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { t.start() }
             }
+        }
+        // Ask for Full Disk Access before the first scan (never in the --cli modes); the scan starts when the dialog closes.
+        if screenshotDir == nil && selfTestDir == nil && FullDiskAccess.shouldPrompt {
+            FullDiskAccess.notePrompted()
+            let path = initialPath
+            let d = FullDiskAccessWindow { [weak self] in
+                guard let self = self else { return }
+                DispatchQueue.main.async { self.fullDiskAccess = nil }
+                self.main.window?.makeKeyAndOrderFront(nil)
+                self.main.start(initialPath: path)
+            }
+            fullDiskAccess = d
+            DispatchQueue.main.async { d.present(over: self.main.window) }
+            return
         }
         main.start(initialPath: initialPath)
     }
@@ -155,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+Dataless.disableMaterialization()      // before anything reads the disk: never download iCloud items (see Access.swift)
 
 let args = CommandLine.arguments
 if args.count >= 2 && args[1] == "--cli" {

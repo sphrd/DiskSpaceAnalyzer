@@ -24,7 +24,7 @@ final class ItemInfo {
 
     static func forDir(_ d: DirNode, _ parentSize: Int64) -> ItemInfo {
         let it = ItemInfo()
-        it.isDir = true; it.dir = d; it.name = d.name; it.size = d.size; it.files = d.files; it.dirs = d.dirs; it.modified = d.modified
+        it.isDir = true; it.dir = d; it.name = d.displayName; it.size = d.size; it.files = d.files; it.dirs = d.dirs; it.modified = d.modified
         it.percent = parentSize > 0 ? 100 * Double(d.size) / Double(parentSize) : 0
         return it
     }

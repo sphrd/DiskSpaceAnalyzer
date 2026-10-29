@@ -21,7 +21,9 @@ func mountPoints() -> Set<String> {
 /// entered: on the startup disk this skips /System/Volumes/* (including the data volume, which the firmlinked /Users,
 /// /Applications... already cover), /Volumes/* and /dev, so nothing is counted twice. Every folder keeps the list of its
 /// own files (the index the Files, File types and Duplicates views search). A file with several hard links counts its
-/// size on disk once per scan; files evicted to iCloud (dataless) count 0 on disk.
+/// size on disk once per scan; files evicted to iCloud (dataless) count 0 on disk, and dataless folders (e.g. a Logic
+/// .logicx project in iCloud Drive) are not entered at all: listing them would download them. Without Full Disk Access
+/// the folders macOS protects with a prompt are not entered either (FullDiskAccess.blocked), unless the scan starts there.
 final class Scanner {
     private let lock = NSCondition()
     private var _files: Int64 = 0, _dirs: Int64 = 0, _bytes: Int64 = 0
@@ -30,6 +32,8 @@ final class Scanner {
     private var stack: [DirNode] = []
     private var finished = false
     private var skip = Set<String>()
+    private var blocked = Set<String>()        // protected folders not entered without Full Disk Access
+    var alsoBlocked = Set<String>()            // more folders to treat as protected (self-test)
     private let linkLock = NSLock()
     private var seenLinks = Set<UInt64>()
 
@@ -48,7 +52,13 @@ final class Scanner {
         skip = mountPoints()
         skip.remove(path)
         skip.remove(path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path + "/")
+        blocked = FullDiskAccess.blocked(for: path).union(alsoBlocked)
         let root = DirNode(name: path, parent: nil)
+        if Dataless.isDataless(path) {
+            root.skipped = .notDownloaded
+            root.fileList = []
+            return root
+        }
         stack = [root]
         let n = min(32, max(8, 2 * ProcessInfo.processInfo.activeProcessorCount))
         let group = DispatchGroup()
@@ -94,18 +104,22 @@ final class Scanner {
             node.localBytes = b; node.localAlloc = a; node.localFiles = Int64(list.count)
         }
         node.denied = result.denied
-        for (name, mtime) in result.dirs {
-            let c = DirNode(name: name, parent: node)
-            c.modified = mtime
+        var toScan = 0
+        for d in result.dirs {
+            let c = DirNode(name: d.name, parent: node)
+            c.modified = d.mtime
+            if d.dataless { c.skipped = .notDownloaded }
+            else if !blocked.isEmpty && blocked.contains(PathUtil.join(path, d.name)) { c.skipped = .needsAccess }
+            if c.skipped == .no { toScan += 1 } else { c.fileList = [] }
             subs.append(c)
         }
         node.children = subs
 
         lock.lock()
         _bytes += node.localBytes; _files += node.localFiles; _dirs += 1
-        if !subs.isEmpty && !_cancelled {
-            node.pending = subs.count
-            stack.append(contentsOf: subs)
+        if toScan > 0 && !_cancelled {
+            node.pending = toScan
+            stack.append(contentsOf: subs.filter { $0.skipped == .no })
             lock.broadcast()
             lock.unlock()
         } else {
@@ -143,9 +157,9 @@ final class Scanner {
     /// link count (u32), allocated size (off_t) and data length (off_t). Fields are only 4-byte aligned, so every read is
     /// unaligned. files == nil when the folder cannot be read.
     static func readFolder(_ path: String, wantDirs: Bool, skip: Set<String> = [], cancelled: () -> Bool = { false },
-                           firstLink: (UInt64) -> Bool) -> (files: [FileRec]?, dirs: [(String, Int64)], denied: Bool) {
+                           firstLink: (UInt64) -> Bool)                            -> (files: [FileRec]?, dirs: [(name: String, mtime: Int64, dataless: Bool)], denied: Bool) {
         var files: [FileRec] = []
-        var dirs: [(String, Int64)] = []
+                                   var dirs: [(name: String, mtime: Int64, dataless: Bool)] = []
         let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         if fd < 0 { return (nil, [], errno != ENOENT) }
         defer { close(fd) }
@@ -192,7 +206,7 @@ final class Scanner {
                     if !wantDirs { continue }
                     let name = String(cString: namePtr)
                     if !skip.isEmpty && skip.contains(PathUtil.join(path, name)) { continue }   // another volume is mounted here
-                    dirs.append((name, mtime))
+                    dirs.append((name, mtime, flags & Scanner.sfDataless != 0))   // a dataless folder is never opened
                 } else if type == VLNK.rawValue {
                     continue
                 } else {
@@ -220,6 +234,7 @@ final class Scanner {
     /// counting nothing on disk.
     @discardableResult
     static func refreshFiles(_ dir: DirNode) -> Bool {
+        if dir.insideSkipped { return false }
         var linked = Set<String>()
         for f in dir.fileList ?? [] where f.flags & FileRec.hardLinkFlag != 0 { linked.insert(f.name) }
         let r = readFolder(dir.fullPath, wantDirs: false, firstLink: { _ in true })

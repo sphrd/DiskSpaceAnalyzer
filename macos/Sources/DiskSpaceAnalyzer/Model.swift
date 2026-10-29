@@ -27,9 +27,32 @@ final class DirNode {
     var fileList: [FileRec]?          // nil when the folder could not be read
     var modified: Int64 = 0
     var denied = false
+    var skipped = Skipped.no          // not entered by the scan (counts nothing)
     var pending = 0                   // children not finished yet (guarded by the scanner lock)
 
+    enum Skipped {
+        case no
+        case notDownloaded            // dataless iCloud / File Provider folder: listing it would download it
+        case needsAccess              // folder macOS protects; without Full Disk Access opening it asks the user
+    }
+
     init(name: String, parent: DirNode?) { self.name = name; self.parent = parent }
+
+    /// The name as the tree and the lists show it.
+    var displayName: String {
+        switch skipped {
+        case .no: return name
+        case .notDownloaded: return name + "  (not downloaded)"
+        case .needsAccess: return name + "  [needs Full Disk Access]"
+        }
+    }
+
+    /// This folder or a folder above it was not entered by the scan.
+    var insideSkipped: Bool {
+        var n: DirNode? = self
+        while let c = n { if c.skipped != .no { return true }; n = c.parent }
+        return false
+    }
 
     var size: Int64 { DirNode.onDisk ? alloc : bytes }
     var localSize: Int64 { DirNode.onDisk ? localAlloc : localBytes }

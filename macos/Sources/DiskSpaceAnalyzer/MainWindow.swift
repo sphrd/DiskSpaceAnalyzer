@@ -125,6 +125,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     static let topCount = 1000
     static let maxFilesShown = 2000
+    static let chromeHeight: CGFloat = 12 + 32 + 8 + 32 + 10 + 28     // toolbar rows above the split view, status line below
+    static let listMinWidth: CGFloat = 360
 
     // Model
     var roots: [ScanRoot] = []
@@ -227,7 +229,10 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     convenience init() {
         let vf = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let size = NSSize(width: min(1280, vf.width * 0.85), height: min(760, vf.height * 0.85))
+        // Wide enough for the tree, a list of about 400 px and a square chart pane as high as the split view.
+        let height = min(760, vf.height * 0.85)
+        let wanted = 2 * 15 + 430 + 2 + 400 + (height - MainWindowController.chromeHeight - 36)
+        let size = NSSize(width: min(max(1280, wanted), vf.width * 0.92), height: height)
         let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = "Disk Space Analyzer"
         w.appearance = NSAppearance(named: .darkAqua)
@@ -360,11 +365,12 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         rightPane.onLayout = { [unowned self] r in
             self.viewTabs.frame = NSRect(x: 0, y: 0, width: r.width, height: 30)
             self.split2.frame = NSRect(x: 0, y: 36, width: r.width, height: max(50, r.height - 36))
-            if !self.split2Positioned && r.width > 400 {
+            // Once the tree has its width: the chart pane as wide as it is high (the largest chart), the list gets the rest.
+            if self.splitPositioned && !self.split2Positioned && r.width > 400 {
                 self.split2Positioned = true
-                let w = r.width
-                let chartW = min(330, w * 0.38)
-                self.split2.setPosition(w - chartW - self.split2.dividerThickness, ofDividerAt: 0)
+                let w = r.width, div = self.split2.dividerThickness
+                let chartW = max(180, min(self.split2.frame.height, w - MainWindowController.listMinWidth - div))
+                self.split2.setPosition(w - chartW - div, ofDividerAt: 0)
             }
         }
 
@@ -443,7 +449,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     }
 
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        splitView === split ? 180 : 200
+        splitView === split ? 180 : MainWindowController.listMinWidth
     }
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         splitView === split ? splitView.bounds.width - 420 : splitView.bounds.width - 180
@@ -531,9 +537,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     @objc private func chooseDrive(_ sender: NSMenuItem) { if let p = sender.representedObject as? String { scanPath(p) } }
 
-    private func openFullDiskAccess() {
-        if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(u) }
-    }
+    private func openFullDiskAccess() { NSWorkspace.shared.open(FullDiskAccess.settingsURL) }
 
     // MARK: Scanning
 
@@ -622,13 +626,18 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         return node
     }
 
-    /// The deepest scanned folder holding path; with exact, only a folder whose path is exactly path.
+    /// The deepest scanned folder holding path; with exact, only a folder whose path is exactly path. A folder another
+    /// scan did enter is preferred to one that was skipped (e.g. Desktop scanned on its own, skipped in the disk's scan).
     func findScanned(_ path: String, exact: Bool) -> DirNode? {
+        var skipped: DirNode?
         for r in roots {
             guard let n = r.node, PathUtil.isWithin(path, n.fullPath) else { continue }
-            if let d = MainWindowController.findByPath(n, path), !exact || PathUtil.same(d.fullPath, path) { return d }
+            if let d = MainWindowController.findByPath(n, path), !exact || PathUtil.same(d.fullPath, path) {
+                if !d.insideSkipped { return d }
+                if skipped == nil { skipped = d }
+            }
         }
-        return nil
+        return skipped
     }
 
     func setScanning(_ on: Bool, _ text: String?) {
@@ -746,8 +755,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             }
             c.pct = c.bar >= 0 ? Fmt.pct(c.bar) : ""
         } else if let d = item as? DirNode {
-            c.name = d.denied ? d.name + "  [access denied]" : d.name
-            c.dim = d.denied
+            c.name = d.denied ? d.name + "  [access denied]" : d.displayName
+            c.dim = d.denied || d.skipped != .no
             c.size = Fmt.size(d.size)
             let parentSize = d.parent?.size ?? 0
             c.bar = parentSize > 0 ? 100 * Double(d.size) / Double(parentSize) : 0
@@ -873,9 +882,17 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         setChanges(d, items)
         for it in items {
             it.cells = [it.name, Fmt.size(it.size), Fmt.pct(it.percent), changeText(it), Fmt.count(it.files), it.isDir ? Fmt.count(it.dirs) : "", Fmt.date(it.modified)]
-            if it.isDir, let dn = it.dir, dn.denied { it.color = T.MUTED }
+            if it.isDir, let dn = it.dir, dn.denied || dn.skipped != .no { it.color = T.MUTED }
         }
-        pContents.setRows(items, "")
+        var empty = ""
+        switch d.skipped {
+        case .notDownloaded:
+            empty = "This folder is in iCloud and not downloaded: it takes no space on this Mac.\nIt is not opened, so nothing gets downloaded."
+        case .needsAccess:
+            empty = "macOS protects this folder. Press Rescan folder (⌘R) to scan it (macOS asks once),\nor give the app Full Disk Access (button in the toolbar) and reopen it."
+        case .no: break
+        }
+        pContents.setRows(items, empty)
         pContents.setCaption("\(Fmt.shorten(d.fullPath, 90))  -  \(Fmt.size(d.size)) in \(Fmt.count(d.files)) files and \(Fmt.count(d.dirs)) folders" + changeCaption(d))
         contentsChanged()
         updateButtons()
