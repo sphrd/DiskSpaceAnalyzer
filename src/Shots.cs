@@ -21,6 +21,7 @@ namespace DiskSpaceAnalyzer
         void MakeDemoDrive()
         {
             foreach (var w in roots.ToList()) StopWatching(w);
+            measure.SelectedIndex = 0;   // the demo files are sparse: they only look big by file size
             var r = roots.First(x => x.Node != null);
             roots.Clear();
             r.Path = @"E:\"; r.Node.Name = @"E:\"; r.Previous = null; r.IsDrive = true; r.IsSystem = false; r.Label = "Data";

@@ -112,6 +112,11 @@ patterns (Part 3) are applied through the WinForms mapping below.
   also make it clickable so that i can jump one dir above by clicking. (as a way to reverse the click on one of the pies).
   default to Size on disk instead of Size. The pie chart is not animating transforming from the logo now, why?"
 
+- 2026-10-29: "the mac app takes very long on some files, they were logicx files on my icloud ... it shouldnt be downloading
+  the files ... in the dmg make the arrow to show u need to drag the app into Applications folder. on first run, prompt the user to
+  give full disk access ... as the default make the size of the right pane bigger so that it is a square when opened up.
+  (maximum chart radius) on the Readme and github page, re-read the whole doc and redo it. everything that was for earlier
+  versions should be deleted. "Why" section is pointless ... some mentions of keyboard shortcuts are just for Windows version."
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -283,6 +288,7 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - **Deletion** goes through `DeleteTarget` (file, folder, folder contents only, Recycle Bin) and `ConfirmAndDelete`;
   afterwards `ApplyDeleted` drops removed nodes and rescans folders that still exist. Contents-only targets skip files in
   use quietly (counted). Recycle uses `SHFileOperation` with ALLOWUNDO + WANTNUKEWARNING.
+- **Default layout:** the chart pane is square (as wide as the panes are tall), the list keeps at least 380 px.
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
 - **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI

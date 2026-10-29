@@ -299,8 +299,10 @@ namespace DiskSpaceAnalyzer
             Shown += (s, e) =>
             {
                 // Tree and chart keep their preferred widths but give way on narrow windows, so the list stays usable.
-                split.SplitterDistance = Math.Min(S(420), split.Width * 29 / 100);
-                split2.SplitterDistance = Math.Max(S(200), split2.Width - Math.Min(S(300), split2.Width * 34 / 100) - split2.SplitterWidth);
+                split.SplitterDistance = Math.Min(S(380), split.Width * 26 / 100);
+                // The chart pane is square (as wide as it is tall) for the largest chart; the list keeps at least 380 px.
+                int chartW = Math.Max(S(220), Math.Min(split2.Height, split2.Width - S(380) - split2.SplitterWidth));
+                split2.SplitterDistance = Math.Max(S(200), split2.Width - chartW - split2.SplitterWidth);
                 LoadDrives();
                 RefreshTree(null);
                 // The system drive is analyzed automatically; other drives are listed and scanned on demand.
