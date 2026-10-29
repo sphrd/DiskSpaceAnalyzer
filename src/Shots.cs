@@ -117,7 +117,7 @@ namespace DiskSpaceAnalyzer
                 for (int i = 0; i < pages.Count; i++)
                 {
                     var p = pages[i];
-                    if (ShotDemo && (p == pSuggest || p == pChanges)) continue;   // they would show this computer
+                    if (ShotDemo && (p == pSuggest || p == pChanges || p == pApps)) continue;   // they would show this computer
                     if (p == pBasket)
                         foreach (var it in pFiles.List.Items.Cast<ListViewItem>().Select(x => x.Tag as ItemInfo).Where(x => x != null && x.CanDelete).Take(4))
                             foreach (var t in DeleteTarget.From(it)) AddTarget(t);
@@ -133,6 +133,16 @@ namespace DiskSpaceAnalyzer
                         var first = suggestions.Where(x => x.Size > 0 && x.Targets.Count > 1).OrderByDescending(x => x.Size).FirstOrDefault()
                             ?? suggestions.Where(x => x.Size > 0).OrderByDescending(x => x.Size).FirstOrDefault();
                         if (first != null) { first.Expanded = true; ShowSuggestions(); }
+                    }
+                    if (p == pApps)
+                    {
+                        for (int k = 0; k < 600 && (apps == null || appsLoading); k++) await Task.Delay(200);
+                        // Show what "Look for leftovers" finds for the first app that has some (read only).
+                        foreach (var a in apps.Where(x => !x.IsStore).Take(15).ToList())
+                        {
+                            await FindLeftovers(a);
+                            if (a.Leftovers.Count > 0) { a.Expanded = true; ShowApps(); RevealApp(a); break; }
+                        }
                     }
                     await Task.Delay(i == 0 ? 2500 : 2000);
                     if (ShotDemo) ClearHover();
@@ -292,6 +302,8 @@ namespace DiskSpaceAnalyzer
                 check(none0 && mixed && all1, "suggestions: deselect all, one ticked = mixed, select all");
                 suggestions = saved;
 
+                await SelfTestApps(check);
+
                 // Hover text: full name and full path.
                 var dupFile = Scanner.ListFiles(FindScanned(P("C"), true)).First(f => f.Name == "dup1.bin");
                 string ft = HoverText(ItemInfo.ForFile(dupFile, 0)), dt = HoverText(ItemInfo.ForDir(FindScanned(P("C"), true), 0));
@@ -324,6 +336,72 @@ namespace DiskSpaceAnalyzer
         }
 
         DateTime _when;
+
+        /// <summary>Apps tab: a fake per-user app (uninstall entry, program folder, leftovers in AppData and the registry).</summary>
+        async Task SelfTestApps(Action<bool, string> check)
+        {
+            string dir = SelfTestDir;
+            string appDir = Path.Combine(dir, @"Prog\DSA SelfTest App");
+            string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DSA SelfTest App");
+            string roam = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DSA SelfTest App");
+            string ukey = UninstallPath + @"\DSA-SelfTest-App";
+            string backup = null;
+            try
+            {
+                Directory.CreateDirectory(appDir);
+                File.WriteAllBytes(Path.Combine(appDir, "app.exe"), new byte[50000]);
+                Directory.CreateDirectory(local);
+                File.WriteAllBytes(Path.Combine(local, "settings.ini"), new byte[20000]);
+                Directory.CreateDirectory(roam);
+                File.WriteAllBytes(Path.Combine(roam, "x.dat"), new byte[10000]);
+                using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\DSA SelfTest App")) k.SetValue("Last", "1");
+                using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(ukey))
+                {
+                    k.SetValue("DisplayName", "DSA SelfTest App");
+                    k.SetValue("DisplayVersion", "1.0");
+                    k.SetValue("Publisher", "DSA Test");
+                    k.SetValue("InstallLocation", appDir);
+                    k.SetValue("UninstallString", "cmd.exe /c rmdir /s /q \"" + appDir + "\" & reg delete \"HKCU\\" + ukey + "\" /f");
+                }
+
+                AppsTestMode = true;
+                apps = null;
+                viewTabs.SelectedIndex = pages.IndexOf(pApps);
+                FillApps();
+                for (int i = 0; i < 100 && (apps == null || appsLoading); i++) await Task.Delay(100);
+                var app = apps != null ? apps.FirstOrDefault(x => x.Name == "DSA SelfTest App") : null;
+                check(app != null && app.Version == "1.0" && app.Publisher == "DSA Test" && app.Size >= 50000 && SamePath(app.Location, appDir),
+                    "apps: the installed app is listed with version, publisher, size and folder" + (app != null ? " (" + app.Size + " bytes)" : ""));
+                if (app == null) return;
+
+                await UninstallApp(app);
+                var names = app.Leftovers != null ? string.Join(", ", app.Leftovers.Select(l => l.Kind + ": " + l.Label)) : "none";
+                check(app.Uninstalled && !Directory.Exists(appDir) && app.Leftovers != null && app.Leftovers.Count == 3 &&
+                      app.Leftovers.Any(l => SamePath(l.Path, local)) && app.Leftovers.Any(l => SamePath(l.Path, roam)) &&
+                      app.Leftovers.Any(l => l.IsRegistry && l.SubKey == @"Software\DSA SelfTest App"),
+                    "apps: uninstaller ran; leftovers found in AppData and the registry (" + names + ")");
+
+                foreach (var l in app.Leftovers) l.Checked = true;
+                backup = await RemoveLeftovers();
+                bool keyGone;
+                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\DSA SelfTest App")) keyGone = k == null;
+                check(!Directory.Exists(local) && !Directory.Exists(roam) && keyGone && !apps.Contains(app),
+                    "apps: leftovers removed (folders and registry key), the app leaves the list");
+                check(backup != null && File.Exists(backup) && File.ReadAllText(backup, System.Text.Encoding.Unicode).Contains("DSA SelfTest App"),
+                    "apps: the registry key was backed up to a .reg file first");
+            }
+            catch (Exception ex) { check(false, "apps: exception " + ex.Message); }
+            finally
+            {
+                AppsTestMode = false;
+                apps = null;
+                try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(ukey, false); } catch (Exception) { }
+                try { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(@"Software\DSA SelfTest App", false); } catch (Exception) { }
+                foreach (var d in new[] { local, roam }) try { if (Directory.Exists(d)) Directory.Delete(d, true); } catch (Exception) { }
+                try { if (backup != null) File.Delete(backup); } catch (Exception) { }
+                viewTabs.SelectedIndex = pages.IndexOf(pContents);
+            }
+        }
     }
 
     /// <summary>Builds the self-test folder: 9 files in 8 folders, two identical files, a node_modules folder.</summary>

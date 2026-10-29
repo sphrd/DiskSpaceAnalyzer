@@ -55,6 +55,13 @@ open list, and hovering a slice highlights its row and the other way round)
   checked; items to review first start unchecked.
   Suggestions are looked up again whenever the disk changes or you rescan.
 - Hover any row or folder to see its full name and path.
+- **Apps:** every installed app with its real size on disk (Windows: programs and
+  Microsoft Store apps; macOS: apps in Applications). **Uninstall...** runs the
+  app's own uninstaller (on macOS: moves it to the Trash), then finds what it
+  left behind - settings and caches in AppData / ~/Library, shared data,
+  shortcuts and, on Windows, registry keys - and lets you check what to remove.
+  Registry keys are saved to a `.reg` backup first. **Look for leftovers**
+  (right-click) shows what an installed app keeps outside its folder.
 - **Changes:** which folders grew or shrank since the previous scan.
 
 ![Duplicates: groups of identical files and the space their extra copies take (demo data)](assets/screenshot-duplicates.png)

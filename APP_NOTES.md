@@ -137,6 +137,10 @@ patterns (Part 3) are applied through the WinForms mapping below.
 - 2026-10-29: "make the chart window a bit smaller by default. make the Contents tab the default tab again. then u can commit and
   release" (asked: Contents first and opens there, Suggestions second).
 
+- 2026-10-29: "lets add application uninstaller. with fully removing all dependancies of the app. later we can add a registry file
+  checker." Chosen: Apps tab after Suggestions; official uninstaller first, then leftovers; Windows registry leftovers with a .reg
+  backup; Microsoft Store apps included; macOS too. Registry checker: later.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -330,6 +334,19 @@ patterns (Part 3) are applied through the WinForms mapping below.
   Delete permanently (compact 9 pt buttons); headline `<size> can be freed` 15 pt bold in `SUGGEST`. Clicking a tree folder
   while on Suggestions switches to Contents. **Rescan folder** is a circular-arrow icon button (`RoundButton.Glyph`).
   Shots are numbered in tab order: `1-contents`, `2-suggestions`, ... `5-duplicates`.
+- **Apps tab (`Apps.cs`):** uninstall entries from HKLM 64/32 and HKCU (skips SystemComponent, updates with ParentKeyName or`r
+  ReleaseType Update/Hotfix), plus Store apps via `Get-AppxPackage` (SignatureKind Store, not framework/non-removable; name from`r
+  AppxManifest DisplayName). Size = measured program folder (scan index first), else EstimatedSize; apps sharing one folder (Office`r
+  and language packs) count it once (on the entry with the largest EstimatedSize). Uninstall: MSI `msiexec /x {code}`, else the`r
+  UninstallString (shell execute so UAC works), Store `Remove-AppxPackage`; waits for the process, then until the uninstall key is`r
+  gone (NSIS/Inno hand over to a temp copy), overlay button **Continue** to stop waiting. Leftovers: folders in Roaming, Local,`r
+  LocalLow, Local\Programs, ProgramData, Program Files (x86), Documents, Store Packages; Start menu/desktop shortcuts; registry`r
+  Software\<App> and Software\<Publisher>\<App> (HKCU, HKLM 64/32), the uninstall key if left. Names: normalised display name,`r
+  name without version/bitness, folder name, key name (`_is1` stripped); generic words never match; a publisher folder only when`r
+  all it holds is the app. Admin-only items start unchecked without elevation. Registry keys: `reg export` appended to`r
+  `%LOCALAPPDATA%\DiskSpaceAnalyzer\registry-backups\<app> <date>.reg` before `DeleteSubKeyTree`; a key that can't be backed up is kept.`r
+- **Gotcha:** `Directory.GetDirectories` on .NET 4 (no 4.6.2 target) rejects `\\?\` paths; the leftover search silently found`r
+  nothing until it used plain paths (these roots are short).
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one
   folder (the reverse of clicking a slice). **Size on disk** is the default measure.
 - **Gotcha (morph not visible):** the logo-to-chart morph was timed by the wall clock; right after a big scan the UI

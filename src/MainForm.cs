@@ -854,6 +854,7 @@ namespace DiskSpaceAnalyzer
             measure.Enabled = !busy;
             if (btnBasketRecycle != null) btnBasketRecycle.Enabled = btnBasketDelete.Enabled = idle && basket.Count > 0;
             UpdateSuggestionButtons();
+            UpdateAppButtons();
         }
 
         void UpdateProgress()
