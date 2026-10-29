@@ -23,8 +23,9 @@ def need(ok, what):
 need(os.path.isdir(os.path.join(mnt, app)), app + ' on the volume')
 link = os.path.join(mnt, 'Applications')
 need(os.path.islink(link) and os.readlink(link) == '/Applications', 'Applications is a link to /Applications')
-backgrounds = glob.glob(os.path.join(mnt, '.background', '*'))
-need(len(backgrounds) == 1, '.background holds the background: ' + ', '.join(os.path.basename(b) for b in backgrounds))
+backgrounds = [p for p in glob.glob(os.path.join(mnt, '.background*')) + glob.glob(os.path.join(mnt, '.background', '*'))
+               if os.path.isfile(p)]   # dmgbuild writes .background.tiff
+need(len(backgrounds) == 1, 'hidden background picture: ' + ', '.join(os.path.basename(b) for b in backgrounds))
 store = os.path.join(mnt, '.DS_Store')
 need(os.path.isfile(store), '.DS_Store present')
 
