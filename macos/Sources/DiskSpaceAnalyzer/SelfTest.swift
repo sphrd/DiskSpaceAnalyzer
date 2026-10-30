@@ -828,14 +828,14 @@ final class ShotRun {
             for i in 1...6 {
                 let f = demo + "/project-\(i)/build-cache"
                 try? fm.createDirectory(atPath: f, withIntermediateDirectories: true)
-                for k in 1...40 { fm.createFile(atPath: f + "/chunk-\(k).bin", contents: Data(count: 4096 * i)) }
+                for k in 1...10 { fm.createFile(atPath: f + "/chunk-\(k).bin", contents: Data(count: 16384 * i)) }
                 w.addTarget(DeleteTarget(path: f, label: "project-\(i)/build-cache", isDir: true, size: Scanner().run(f).size))
             }
             w.basketChanged()
             w.viewTabs.selectedIndex = w.pages.firstIndex { $0 === w.pBasket } ?? 0
         }
         steps.wait(1)
-        steps.then { DeleteJob.throttle = 20_000; w.deleteBasket(trash: false) }
+        steps.then { DeleteJob.throttle = 60_000; w.deleteBasket(trash: false) }
         steps.wait(1)
         steps.then {
             if let d = PromptDialog.open.last, let v = d.window?.contentView {
@@ -844,7 +844,8 @@ final class ShotRun {
                 d.finish(0)
             } else { print("delete-confirm: no prompt shown") }
         }
-        steps.wait(2.5)
+        // Mid-delete: once two of the six rows have left the list (the job still runs).
+        steps.waitUntil(30) { w.deleteJob == nil || w.pBasket.items.count <= 4 }
         steps.then {
             self.shot("deleting")
             print("deleting: \(w.deleteBar.status) | \(w.deleteBar.detail) | bar \(w.deleteBar.fraction) | \(w.pBasket.items.count) rows left")
