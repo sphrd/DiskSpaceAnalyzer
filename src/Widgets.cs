@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace DiskSpaceAnalyzer
 {
-    internal enum ButtonKind { Primary, Secondary, Warn }
+    internal enum ButtonKind { Primary, Secondary, Warn, Danger }
 
     /// <summary>Flat rounded button (radius 8). Click fires on release inside the button only.</summary>
     internal sealed class RoundButton : Control
@@ -34,8 +34,8 @@ namespace DiskSpaceAnalyzer
             var font = Compact ? Theme.FONT_9 : Font;
             int h = font.Height + Theme.S(Compact ? 10 : 12);
             if (Glyph != null) return new Size(h, h);
-            string sample = MinChars > 0 ? new string('0', MinChars) : Text;
-            int w = TextRenderer.MeasureText(sample, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+            int w = TextRenderer.MeasureText(Text ?? "", font, Size.Empty, TextFormatFlags.NoPadding).Width;
+            if (MinChars > 0) w = Math.Max(w, TextRenderer.MeasureText(new string('0', MinChars), font, Size.Empty, TextFormatFlags.NoPadding).Width);
             return new Size(w + Theme.S(Compact ? 20 : 32), h);
         }
 
@@ -74,6 +74,7 @@ namespace DiskSpaceAnalyzer
             if (!Enabled) { fill = Theme.DISABLED_BG; fore = Theme.DISABLED_FG; }
             else if (Kind == ButtonKind.Primary) { fill = hover ? Theme.ACCENT_ACTIVE : Theme.ACCENT; fore = Theme.BG; }
             else if (Kind == ButtonKind.Warn) { fill = hover ? Theme.WARN_FG : Theme.WARN; fore = Theme.BG; }
+            else if (Kind == ButtonKind.Danger) { fill = hover ? Theme.DANGER_HOVER : Theme.DANGER; fore = Theme.BG; }
             else { fill = hover ? Theme.SECONDARY_HOVER : Theme.BORDER; fore = Theme.FG; }
             Theme.FillRound(g, ClientRectangle, Theme.S(Compact ? 7 : 8), fill, fill);
             if (Glyph != null)
@@ -769,6 +770,7 @@ namespace DiskSpaceAnalyzer
     {
         readonly Timer timer = new Timer { Interval = 40 };
         float angle;
+        public Color Color = Theme.ACCENT;
 
         public Spinner()
         {
@@ -789,7 +791,7 @@ namespace DiskSpaceAnalyzer
             g.Clear(BackColor);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             float w = Math.Max(2f, 6f * Width / 64f), inset = 4f * Width / 64f + w / 2;
-            using (var pen = new Pen(Theme.ACCENT, w) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            using (var pen = new Pen(Color, w) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                 g.DrawArc(pen, inset, inset, Width - 2 * inset, Height - 2 * inset, angle, 120);
         }
 
@@ -810,12 +812,18 @@ namespace DiskSpaceAnalyzer
         public readonly RoundButton CancelButton = new RoundButton("Cancel", ButtonKind.Secondary) { MinChars = 8 };
         string status = "", detail = "";
         double fraction = -1;
+        /// <summary>Delete progress: DANGER_BG fill, DANGER_BORDER outline, DANGER spinner and bar, "Stop" button.</summary>
+        readonly bool danger;
 
-        public ScanBar()
+        public ScanBar() : this(false) { }
+
+        public ScanBar(bool danger)
         {
+            this.danger = danger;
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.BG;
-            spinner.BackColor = Theme.SURFACE;
+            spinner.BackColor = danger ? Theme.DANGER_BG : Theme.SURFACE;
+            if (danger) { spinner.Color = Theme.DANGER; CancelButton.Text = "Stop"; }
             Controls.Add(spinner);
             Controls.Add(CancelButton);
             Height = Theme.S(70);
@@ -866,7 +874,7 @@ namespace DiskSpaceAnalyzer
             var g = e.Graphics;
             g.Clear(BackColor);
             var b = Box;
-            Theme.FillRound(g, b, Theme.S(12), Theme.SURFACE, Theme.BORDER);
+            Theme.FillRound(g, b, Theme.S(12), danger ? Theme.DANGER_BG : Theme.SURFACE, danger ? Theme.DANGER_BORDER : Theme.BORDER);
             int x = spinner.Right + Theme.S(12), right = CancelButton.Left - Theme.S(16);
             const TextFormatFlags f = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding;
             int lineH = Font.Height, smallH = Theme.FONT_9.Height, barH = Theme.S(6);
@@ -874,14 +882,15 @@ namespace DiskSpaceAnalyzer
             int y = b.Y + (b.Height - total) / 2;
             TextRenderer.DrawText(g, status, Theme.FONT, new Rectangle(x, y, Math.Max(0, right - x), lineH), Theme.FG, f);
             y += lineH + Theme.S(3);
-            TextRenderer.DrawText(g, detail, Theme.FONT_9, new Rectangle(x, y, Math.Max(0, right - x), smallH), Theme.MUTED, f);
+            TextRenderer.DrawText(g, detail, Theme.FONT_9, new Rectangle(x, y, Math.Max(0, right - x), smallH), danger ? Theme.DANGER_FG : Theme.MUTED, f);
             if (fraction >= 0)
             {
                 y += smallH + Theme.S(6);
                 var bar = new Rectangle(x, y, Math.Max(0, right - x), barH);
-                Theme.FillRound(g, bar, barH / 2, Theme.BORDER, Theme.BORDER);
+                Color track = danger ? Theme.DANGER_BORDER : Theme.BORDER, fill = danger ? Theme.DANGER : Theme.ACCENT;
+                Theme.FillRound(g, bar, barH / 2, track, track);
                 int w = (int)Math.Round(bar.Width * Math.Min(1, fraction));
-                if (w > 0) Theme.FillRound(g, new Rectangle(bar.X, bar.Y, Math.Max(w, barH), barH), barH / 2, Theme.ACCENT, Theme.ACCENT);
+                if (w > 0) Theme.FillRound(g, new Rectangle(bar.X, bar.Y, Math.Max(w, barH), barH), barH / 2, fill, fill);
             }
         }
     }

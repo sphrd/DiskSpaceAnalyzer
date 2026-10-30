@@ -301,11 +301,13 @@ namespace DiskSpaceAnalyzer
             Contents(list, "Cargo registry cache", Path.Combine(home, @".cargo\registry\cache"), true, false, dev);
             Contents(list, "Go build cache", Path.Combine(local, "go-build"), true, false, dev);
 
-            // node_modules folders in the scanned trees (outermost only).
+            // node_modules folders of the user's own projects (outermost only). Never inside installed programs or tools: those
+            // ship their packages in node_modules too (VS Code, Windows widgets, Electron apps, editor extensions).
             var nm = new Suggestion { Name = "node_modules folders", Safe = true, Note = "JavaScript packages of projects. Restored with npm install (or yarn / pnpm)." };
             foreach (var r in scanned)
-                foreach (var d in OutermostNamed(r, "node_modules"))
+                foreach (var d in OutermostNamed(r, "node_modules", IsAppFolder))
                 {
+                    if (!IsProjectModules(d.FullPath)) continue;
                     nm.Targets.Add(new DeleteTarget { Path = d.FullPath, Label = d.Parent != null ? d.Parent.Name + @"\node_modules" : d.Name, IsDir = true, Dir = d, Size = d.Size, Note = "node_modules" });
                     nm.Size += d.Size;
                 }
@@ -405,16 +407,53 @@ namespace DiskSpaceAnalyzer
             try { var r = new Scanner().Run(dir); return r.Size; } catch (Exception) { return 0; }
         }
 
-        static IEnumerable<DirNode> OutermostNamed(DirNode root, string name)
+        static IEnumerable<DirNode> OutermostNamed(DirNode root, string name, Func<DirNode, bool> skip)
         {
             var stack = new Stack<DirNode>();
             stack.Push(root);
             while (stack.Count > 0)
             {
                 var n = stack.Pop();
+                if (n != root && skip != null && skip(n)) continue;
                 if (n != root && string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase)) { yield return n; continue; }
                 if (n.Children != null) foreach (var c in n.Children) stack.Push(c);
             }
+        }
+
+        static readonly string[] AppRoots =
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        };
+
+        /// <summary>Folders that hold installed programs or tools, never searched for project node_modules: Windows, Program
+        /// Files (incl. WindowsApps), ProgramData, AppData, and hidden tool folders such as .vscode, .cursor, .nvm.</summary>
+        static bool IsAppFolder(DirNode n)
+        {
+            if (n.Name.StartsWith(".") || n.Name.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase)) return true;
+            string p = n.FullPath;
+            return AppRoots.Any(r => !string.IsNullOrEmpty(r) && string.Equals(p.TrimEnd('\\'), r.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// A node_modules folder of a user project: package.json next to it, and nothing in its path that marks an installed
+        /// app or tool (system and program folders, AppData, hidden tool folders, "resources\app" of Electron apps, editor
+        /// "extensions").
+        /// </summary>
+        internal static bool IsProjectModules(string path)
+        {
+            string parent = Native.ParentDir(path);
+            if (string.IsNullOrEmpty(parent) || !File.Exists(Path.Combine(parent, "package.json"))) return false;
+            if (AppRoots.Any(r => !string.IsNullOrEmpty(r) && IsWithin(path, r))) return false;
+            foreach (var part in path.Split('\\'))
+                if (part.StartsWith(".") || part.Equals("extensions", StringComparison.OrdinalIgnoreCase) ||
+                    part.Equals("resources", StringComparison.OrdinalIgnoreCase) || part.Equals("WindowsApps", StringComparison.OrdinalIgnoreCase))
+                    return false;
+            return true;
         }
     }
 }

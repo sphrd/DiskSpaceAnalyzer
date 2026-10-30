@@ -35,14 +35,21 @@ namespace DiskSpaceAnalyzer
     internal sealed unsafe class DeleteJob
     {
         public volatile string Current = "";
-        public long FilesDeleted, Recycled, Skipped;
+        public long FilesDeleted, Recycled, Skipped, BytesDeleted;
         public readonly List<string> Errors = new List<string>();
+        /// <summary>Every file and folder that is gone, as it happens (the window removes their rows live).</summary>
+        public readonly System.Collections.Concurrent.ConcurrentQueue<string> Gone = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        /// <summary>Targets that are finished (whatever could be deleted is gone).</summary>
+        public readonly System.Collections.Concurrent.ConcurrentQueue<DeleteTarget> Finished = new System.Collections.Concurrent.ConcurrentQueue<DeleteTarget>();
+        /// <summary>Stop: the current file is finished, nothing more is deleted.</summary>
+        public volatile bool Stop;
         bool quiet;
 
         public void Run(List<DeleteTarget> targets, bool recycle)
         {
             foreach (var t in targets)
             {
+                if (Stop) return;
                 Current = t.RecycleBin ? "Recycle Bin" : t.Path;
                 if (t.RecycleBin) { EmptyRecycleBin(); continue; }
                 quiet = t.ContentsOnly;
@@ -51,6 +58,7 @@ namespace DiskSpaceAnalyzer
                 else if (t.IsDir) DeleteDirectory(t.Path);
                 else DeleteFile(t.Path);
                 quiet = false;
+                if (!Stop) Finished.Enqueue(t);
             }
         }
 
@@ -82,16 +90,17 @@ namespace DiskSpaceAnalyzer
             {
                 do
                 {
+                    if (Stop) break;
                     if (Native.IsDots(d->FileName)) continue;
                     string full = Native.Join(dir, new string(d->FileName));
                     uint a = d->Attributes;
-                    if ((a & Native.AttrDirectory) == 0) DeleteOneFile(full, a);
+                    if ((a & Native.AttrDirectory) == 0) DeleteOneFile(full, a, ((long)d->SizeHigh << 32) | d->SizeLow);
                     else if ((a & Native.AttrReparsePoint) != 0) RemoveDir(full);
                     else subdirs.Add(full);
                 } while (Native.FindNextFileW(h, d));
             }
             finally { Native.FindClose(h); }
-            foreach (var s in subdirs) DeleteTree(s);
+            foreach (var s in subdirs) { if (Stop) return; DeleteTree(s); }
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -142,7 +151,7 @@ namespace DiskSpaceAnalyzer
         {
             const uint FO_DELETE = 3;
             const ushort Flags = 0x4 | 0x10 | 0x40 | 0x400 | 0x4000;   // SILENT, NOCONFIRMATION, ALLOWUNDO, NOERRORUI, WANTNUKEWARNING
-            for (int i = 0; i < paths.Count; i += 100)
+            for (int i = 0; i < paths.Count && !Stop; i += 100)
             {
                 var batch = paths.GetRange(i, Math.Min(100, paths.Count - i));
                 Current = batch[0];
@@ -150,7 +159,7 @@ namespace DiskSpaceAnalyzer
                 SHFileOperationW(ref op);
                 foreach (var p in batch)
                 {
-                    if (!Native.Exists(p)) Interlocked.Increment(ref Recycled);
+                    if (!Native.Exists(p)) { Interlocked.Increment(ref Recycled); Gone.Enqueue(p); }
                     else if (quiet) Interlocked.Increment(ref Skipped);
                     else lock (Errors) Errors.Add(p + "  -  could not be moved to the Recycle Bin");
                 }
@@ -161,7 +170,13 @@ namespace DiskSpaceAnalyzer
         {
             uint attrs = Native.GetAttributes(path);
             if (attrs == Native.InvalidAttributes) { Error(path, Marshal.GetLastWin32Error()); return; }
-            DeleteOneFile(path, attrs);
+            DeleteOneFile(path, attrs, SizeOf(path));
+        }
+
+        static long SizeOf(string path)
+        {
+            try { return new System.IO.FileInfo(Native.LongPath(path)).Length; } catch (Exception) { }
+            try { return new System.IO.FileInfo(path).Length; } catch (Exception) { return 0; }
         }
 
         public void DeleteDirectory(string path)
@@ -185,35 +200,36 @@ namespace DiskSpaceAnalyzer
                 {
                     do
                     {
+                        if (Stop) break;
                         if (Native.IsDots(d->FileName)) continue;
                         string full = Native.Join(dir, new string(d->FileName));
                         uint a = d->Attributes;
-                        if ((a & Native.AttrDirectory) == 0) DeleteOneFile(full, a);
+                        if ((a & Native.AttrDirectory) == 0) DeleteOneFile(full, a, ((long)d->SizeHigh << 32) | d->SizeLow);
                         else if ((a & Native.AttrReparsePoint) != 0) RemoveDir(full);
                         else subdirs.Add(full);
                     } while (Native.FindNextFileW(h, d));
                 }
                 finally { Native.FindClose(h); }
             }
-            foreach (var s in subdirs) DeleteTree(s);
-            RemoveDir(dir);
+            foreach (var s in subdirs) { if (Stop) return; DeleteTree(s); }
+            if (!Stop) RemoveDir(dir);
         }
 
-        void DeleteOneFile(string path, uint attrs)
+        void DeleteOneFile(string path, uint attrs, long size)
         {
             if ((attrs & Native.AttrReadOnly) != 0) Native.SetAttributes(path, Native.AttrNormal);
-            if (Native.DeleteFile(path)) Interlocked.Increment(ref FilesDeleted);
+            if (Native.DeleteFile(path)) { Interlocked.Increment(ref FilesDeleted); Interlocked.Add(ref BytesDeleted, Math.Max(0, size)); Gone.Enqueue(path); }
             else Error(path, Marshal.GetLastWin32Error());
         }
 
         void RemoveDir(string path)
         {
-            if (Native.RemoveDirectory(path)) return;
+            if (Native.RemoveDirectory(path)) { Gone.Enqueue(path); return; }
             int err = Marshal.GetLastWin32Error();
             if (err == 5)
             {
                 Native.SetAttributes(path, Native.AttrNormal);
-                if (Native.RemoveDirectory(path)) return;
+                if (Native.RemoveDirectory(path)) { Gone.Enqueue(path); return; }
                 err = Marshal.GetLastWin32Error();
             }
             Error(path, err);

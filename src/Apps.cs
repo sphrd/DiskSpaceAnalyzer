@@ -603,10 +603,11 @@ namespace DiskSpaceAnalyzer
         async Task UninstallApp(InstalledApp a)
         {
             if (a == null || a.Uninstalled || busy || scanning) return;
-            if (SelfTestDir == null && MessageBox.Show(this,
-                    string.Format("Uninstall {0}{1}?\n\nIts own uninstaller runs first (finish its steps). Then Disk Space Analyzer checks all the app's files " +
-                        "and settings again and offers to delete whatever is left.", a.Name, a.Size > 0 ? " (" + Fmt.Size(a.Size) + ")" : ""),
-                    AppName + " - uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            if (SelfTestDir == null && Alert(AlertIcon.Danger, "Uninstall " + a.Name + "?",
+                    (a.Size > 0 ? Fmt.Size(a.Size) + ". " : "") + "Its own uninstaller runs first: follow its steps. Then Disk Space Analyzer checks all the app's " +
+                    "files and settings again and offers to delete whatever is left.", null,
+                    a.Leftovers != null && a.Leftovers.Count > 0 ? a.Leftovers.Select(l => KindName(l.Kind) + ": " + l.Path + "\t" + (l.IsRegistry ? "registry" : Fmt.Size(l.Size))).ToList() : null,
+                    "Uninstall", "Cancel") != "Uninstall") return;
 
             bool done = await RunUninstaller(a);
             if (!done)
@@ -629,14 +630,11 @@ namespace DiskSpaceAnalyzer
             ShowApps();
             RevealApp(a);
             var rest = a.Leftovers;
-            string list = string.Join("\n", rest.Take(12).Select(l => "    " + Fmt.Shorten(l.Path, 90) + (l.IsRegistry ? "" : "   (" + Fmt.Size(l.Size) + ")") +
-                (l.Note.Length > 0 ? "  -- " + l.Note : "")));
-            if (rest.Count > 12) list += string.Format("\n    ... and {0:N0} more", rest.Count - 12);
-            bool yes = SelfTestDir != null || MessageBox.Show(this,
-                string.Format("{0} was uninstalled, but {1:N0} item{2} ({3}) remain:\n\n{4}\n\nDelete them too?{5}\n\nThis bypasses the Recycle Bin and CANNOT be undone.",
-                    a.Name, rest.Count, rest.Count == 1 ? "" : "s", Fmt.Size(rest.Sum(l => l.Size)), list,
-                    rest.Any(l => l.IsRegistry) ? " Registry keys are saved to a .reg backup first." : ""),
-                AppName + " - leftovers of " + a.Name, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1) == DialogResult.Yes;
+            bool yes = SelfTestDir != null || Alert(AlertIcon.Danger,
+                string.Format("{0} was uninstalled, but {1:N0} item{2} remain", a.Name, rest.Count, rest.Count == 1 ? "" : "s"),
+                string.Format("Delete them too? {0} will be deleted. This bypasses the Recycle Bin and cannot be undone.", Fmt.Size(rest.Sum(l => l.Size))),
+                rest.Any(l => l.IsRegistry) ? "Registry keys are saved to a .reg backup first." : null, LeftoverLines(rest),
+                "Delete them", "Keep them") == "Delete them";
             if (!yes)
             {
                 statusLabel.Text = string.Format("Uninstalled {0}. {1:N0} leftover{2} ({3}) kept: check any of them and press Remove leftovers to delete them later.",
@@ -977,28 +975,20 @@ namespace DiskSpaceAnalyzer
             var items = owners.SelectMany(x => x.Leftovers.Where(l => l.Checked)).ToList();
             if (items.Count == 0) return null;
             long total = items.Sum(l => l.Size);
-            string list = string.Join("\n", items.Take(12).Select(l => "    " + Fmt.Shorten(l.Path, 90) + (l.IsRegistry ? "" : "   (" + Fmt.Size(l.Size) + ")")));
-            if (items.Count > 12) list += string.Format("\n    ... and {0:N0} more", items.Count - 12);
             string who = owners.Count == 1 ? owners[0].Name : owners.Count + " apps";
-            if (confirm && SelfTestDir == null && MessageBox.Show(this,
-                    string.Format("Permanently remove {0:N0} leftover{1} of {2} ({3})?\n\n{4}\n\n{5}This bypasses the Recycle Bin and CANNOT be undone.",
-                        items.Count, items.Count == 1 ? "" : "s", who, Fmt.Size(total), list,
-                        items.Any(l => l.IsRegistry) ? "Registry keys are saved to a .reg backup first (in " + BackupFolder + ").\n\n" : ""),
-                    AppName + " - remove leftovers", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return null;
+            if (confirm && SelfTestDir == null && Alert(AlertIcon.Danger,
+                    string.Format("Remove {0:N0} leftover{1} of {2} permanently?", items.Count, items.Count == 1 ? "" : "s", who),
+                    Fmt.Size(total) + " will be deleted. This bypasses the Recycle Bin and cannot be undone.",
+                    items.Any(l => l.IsRegistry) ? "Registry keys are saved to a .reg backup first (in " + BackupFolder + ")." : null, LeftoverLines(items),
+                    "Delete permanently", "Cancel") != "Delete permanently") return null;
 
             var files = items.Where(l => !l.IsRegistry).Select(l => new DeleteTarget { Path = l.Path, Label = l.Label, IsDir = l.IsDir, Size = l.Size }).ToList();
             var keys = items.Where(l => l.IsRegistry).ToList();
             var job = new DeleteJob();
-            deleteJob = job;
             var regErrors = new List<string>();
             string backup = null;
-            BeginOwnChanges(files.Select(f => f.Path));
-            SetBusy(true);
-            try
-            {
-                await RunThread(() =>
+            await RunDelete(job, files, false, () =>
                 {
-                    job.Run(files, false);
                     if (keys.Count > 0)
                     {
                         Directory.CreateDirectory(BackupFolder);
@@ -1015,10 +1005,6 @@ namespace DiskSpaceAnalyzer
                         }
                     }
                 });
-                job.Current = "Updating the scan...";
-                await ApplyDeleted(files);
-            }
-            finally { deleteJob = null; SetBusy(false); EndOwnChanges(); }
 
             // Measure again: gone items leave, the rest stay with what is left.
             foreach (var o in owners)
@@ -1039,10 +1025,15 @@ namespace DiskSpaceAnalyzer
             statusLabel.Text = string.Format("Removed leftovers of {0}: freed {1}{2}.{3}", who, Fmt.Size(Math.Max(0, total - owners.Sum(o => o.Leftovers.Where(l => l.Checked).Sum(l => l.Size)))),
                 errors > 0 ? string.Format(", {0:N0} item{1} could not be removed", errors, errors == 1 ? "" : "s") : "",
                 backup != null && File.Exists(backup) ? " Registry backup: " + backup : "");
-            if (errors > 0 && SelfTestDir == null)
-                MessageBox.Show(this, "Some leftovers could not be removed (in use, or access denied" + (isAdmin ? "" : " - try Run as administrator") + "):\n\n" +
-                    string.Join("\n", job.Errors.Concat(regErrors).Take(20).Select(e => Fmt.Shorten(e, 160))), AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (errors > 0 && SelfTestDir == null) ShowDeleteErrors(job.Errors.Concat(regErrors).ToList(), "removed");
             return backup;
+        }
+
+        /// <summary>Details-box lines for leftovers: kind and path, then (after a tab) size or "registry" and any note.</summary>
+        static List<string> LeftoverLines(IEnumerable<Leftover> items)
+        {
+            return items.Select(l => KindName(l.Kind) + ": " + l.Path + "\t" + (l.IsRegistry ? "registry" : Fmt.Size(l.Size)) +
+                (string.IsNullOrEmpty(l.Note) ? "" : "  --  " + l.Note)).ToList();
         }
 
         static bool KeyExists(Leftover k)

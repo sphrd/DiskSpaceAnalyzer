@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -141,31 +142,33 @@ namespace DiskSpaceAnalyzer
             if (job != null) AfterDeleteRemeasure(targets);
         }
 
-        /// <summary>Asks, deletes (or recycles) with the busy overlay, then updates the scan. Null when cancelled.</summary>
+        /// <summary>Asks (themed confirmation with every item), deletes (or recycles) with the red delete strip while the open
+        /// list drops what is gone, then updates the scan. Null when cancelled.</summary>
         async Task<DeleteJob> ConfirmAndDelete(List<DeleteTarget> targets, bool recycle)
         {
             if (targets.Any(t => !t.RecycleBin && roots.Any(r => r.Node != null && SamePath(r.Node.FullPath, t.Path)) && !t.ContentsOnly))
             {
-                MessageBox.Show(this, "A scanned drive or folder itself cannot be deleted here.\nSelect items inside it instead.",
-                    AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Alert(AlertIcon.Warn, "A scanned drive or folder can't be deleted here", "Select items inside it instead.", null, null, "OK");
                 return null;
             }
             long total = targets.Sum(t => t.Size);
-            string list = string.Join("\n", targets.Take(12).Select(t => "    " +
-                (t.RecycleBin ? "Empty the Recycle Bin" : Fmt.Shorten(t.Path, 90) + (t.ContentsOnly ? "  (contents)" : "")) + "   (" + Fmt.Size(t.Size) + ")"));
-            if (targets.Count > 12) list += string.Format("\n    ... and {0:N0} more", targets.Count - 12);
-            string msg = recycle
-                ? string.Format("Move {0} item{1} ({2}) to the Recycle Bin?\n\n{3}\n\nYou can restore them from the Recycle Bin. The space is freed when the bin is emptied.",
-                    targets.Count, targets.Count == 1 ? "" : "s", Fmt.Size(total), list)
-                : string.Format("Permanently delete {0} item{1} ({2})?\n\n{3}\n\nThis bypasses the Recycle Bin and CANNOT be undone.",
-                    targets.Count, targets.Count == 1 ? "" : "s", Fmt.Size(total), list);
+            string n = string.Format("{0:N0} item{1}", targets.Count, targets.Count == 1 ? "" : "s");
             string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-            if (targets.Any(t => !t.ContentsOnly && !t.RecycleBin && (IsWithin(t.Path, win) || IsWithin(t.Path, pf) || IsWithin(t.Path, pf86))))
-                msg += "\n\nWARNING: this includes Windows or Program Files content. Deleting it can break Windows or installed programs.";
-            if (SelfTestDir == null && MessageBox.Show(this, msg, AppName + (recycle ? " - move to Recycle Bin" : " - confirm permanent delete"), MessageBoxButtons.YesNo,
-                recycle ? MessageBoxIcon.Question : MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return null;
+            string note = targets.Any(t => !t.ContentsOnly && !t.RecycleBin && (IsWithin(t.Path, win) || IsWithin(t.Path, pf) || IsWithin(t.Path, pf86)))
+                ? "This includes Windows or Program Files content. Deleting it can break Windows or installed programs." : null;
+            if (SelfTestDir == null)
+            {
+                string pick = recycle
+                    ? Alert(AlertIcon.Warn, "Move " + n + " to the Recycle Bin?",
+                        Fmt.Size(total) + " go to the Recycle Bin. You can restore them from there; the space is freed when the bin is emptied.",
+                        note, TargetLines(targets), "Move to Recycle Bin", "Cancel")
+                    : Alert(AlertIcon.Danger, "Delete " + n + " permanently?",
+                        Fmt.Size(total) + " will be deleted. This bypasses the Recycle Bin and cannot be undone.",
+                        note, TargetLines(targets), "Delete permanently", "Cancel");
+                if (pick != (recycle ? "Move to Recycle Bin" : "Delete permanently")) return null;
+            }
 
             DirNode target = current;
             foreach (var t in targets)
@@ -176,16 +179,7 @@ namespace DiskSpaceAnalyzer
 
             long before = roots.Where(r => r.Node != null).Sum(r => r.Node.Size);
             var job = new DeleteJob();
-            deleteJob = job;
-            BeginOwnChanges(targets.Where(x => !x.RecycleBin).Select(x => x.Path));
-            SetBusy(true);
-            try
-            {
-                await RunThread(() => job.Run(targets, recycle));
-                job.Current = "Updating the scan...";
-                await ApplyDeleted(targets);
-            }
-            finally { deleteJob = null; SetBusy(false); EndOwnChanges(); }
+            await RunDelete(job, targets, recycle, null);
 
             if (target == null || !IsAttached(target)) target = root;
             current = null;
@@ -195,22 +189,167 @@ namespace DiskSpaceAnalyzer
             if (lastView != null && lastView.Visible) lastView.Focus();
             long freed = before - roots.Where(r => r.Node != null).Sum(r => r.Node.Size);
             string skipped = job.Skipped > 0 ? string.Format(", {0:N0} in use were skipped", job.Skipped) : "";
-            statusLabel.Text = recycle
+            string stopped = job.Stop ? " Stopped: the rest was not touched." : "";
+            statusLabel.Text = (recycle
                 ? string.Format("Moved {0:N0} item{1} ({2}) to the Recycle Bin{3}{4}.", job.Recycled, job.Recycled == 1 ? "" : "s", Fmt.Size(freed), skipped,
                     job.Errors.Count > 0 ? string.Format(", {0:N0} could not be moved", job.Errors.Count) : "")
                 : string.Format("Freed {0}. {1:N0} files deleted{2}{3}.", Fmt.Size(Math.Max(0, freed)), job.FilesDeleted, skipped,
-                    job.Errors.Count > 0 ? string.Format(", {0:N0} items could not be deleted", job.Errors.Count) : "");
+                    job.Errors.Count > 0 ? string.Format(", {0:N0} items could not be deleted", job.Errors.Count) : "")) + stopped;
 
-            if (job.Errors.Count > 0 && SelfTestDir == null)
-            {
-                string err = string.Join("\n", job.Errors.Take(20).Select(e => Fmt.Shorten(e, 160)));
-                if (job.Errors.Count > 20) err += string.Format("\n... and {0:N0} more", job.Errors.Count - 20);
-                MessageBox.Show(this, "Some items could not be " + (recycle ? "moved" : "deleted") + " (in use, or access denied" +
-                    (isAdmin ? "" : " - try Run as administrator") + "):\n\n" + err, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            if (job.Errors.Count > 0 && SelfTestDir == null) ShowDeleteErrors(job.Errors, recycle ? "moved to the Recycle Bin" : "deleted");
             return job;
         }
 
+        /// <summary>One line per target for the confirmation's details box: path, then (after a tab) its size.</summary>
+        static List<string> TargetLines(IEnumerable<DeleteTarget> targets)
+        {
+            return targets.Select(t => (t.RecycleBin ? "Empty the Recycle Bin" : t.Path + (t.ContentsOnly ? "  (its contents)" : "")) + "\t" + Fmt.Size(t.Size)).ToList();
+        }
+
+        /// <summary>Themed report of what could not be deleted: every item with the reason, in a scrollable box.</summary>
+        void ShowDeleteErrors(IList<string> errors, string verb)
+        {
+            var lines = errors.Select(e => { int i = e.LastIndexOf("  -  ", StringComparison.Ordinal); return i > 0 ? e.Substring(0, i) + "\t" + e.Substring(i + 5) : e; }).ToList();
+            Alert(AlertIcon.Warn, string.Format("{0:N0} item{1} could not be {2}", lines.Count, lines.Count == 1 ? "" : "s", verb),
+                "They are in use by a running program, or access was denied. Everything else was " + verb + ".",
+                isAdmin ? null : "Run as administrator (toolbar) to remove items that need it.", lines, "OK");
+        }
+
+        /// <summary>Every prompt of the app goes through here: the themed AlertForm. Returns the button pressed (null = closed).</summary>
+        internal string Alert(AlertIcon icon, string heading, string body, string note, IList<string> details, params string[] buttons)
+        {
+            using (var f = new AlertForm(icon, heading, body, note, details, buttons))
+            {
+                f.ShowDialog(this);
+                return f.Result;
+            }
+        }
+
+        // ---------------------------------------------------------------- deleting, live
+
+        readonly HashSet<string> liveGone = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<DeleteTarget> liveDone = new HashSet<DeleteTarget>();
+        long deleteTotalFiles;
+        bool deleteRecycle;
+        /// <summary>Self-test: rows of the open list that left it while the job was still running.</summary>
+        internal int LiveRowsRemoved;
+
+        /// <summary>
+        /// Runs a delete job with the red delete strip under the toolbar. The window stays browsable (tabs, scrolling, hover)
+        /// while actions that change the disk are disabled; the open list (any tab) drops rows as their files go.
+        /// </summary>
+        async Task RunDelete(DeleteJob job, List<DeleteTarget> targets, bool recycle, Action alsoOnThread)
+        {
+            deleteJob = job;
+            deleteRecycle = recycle;
+            liveGone.Clear();
+            liveDone.Clear();
+            LiveRowsRemoved = 0;
+            deleteTotalFiles = 0;
+            foreach (var t in targets)
+            {
+                if (t.RecycleBin) continue;
+                if (!t.IsDir && !t.ContentsOnly) { deleteTotalFiles++; continue; }
+                var dn = t.Dir != null && IsAttached(t.Dir) ? t.Dir : FindScanned(t.Path, true);
+                if (dn != null) deleteTotalFiles += dn.Files;
+            }
+            BeginOwnChanges(targets.Where(x => !x.RecycleBin).Select(x => x.Path));
+            busy = true;
+            deleteBar.Start(recycle ? "Moving to the Recycle Bin..." : "Deleting permanently...");
+            uiTimer.Start();
+            UpdateButtons();
+            try
+            {
+                await RunThread(() =>
+                {
+                    job.Run(targets, recycle);
+                    if (alsoOnThread != null && !job.Stop) alsoOnThread();
+                });
+                DrainLive(job);
+                deleteBar.SetProgress("Updating the scan...", "", -1);
+                await ApplyDeleted(targets);
+            }
+            finally
+            {
+                deleteJob = null;
+                busy = false;
+                deleteBar.Stop();
+                if (!scanning) uiTimer.Stop();
+                UpdateButtons();
+                EndOwnChanges();
+                liveGone.Clear();
+                liveDone.Clear();
+                if (drivesChanged) BeginInvoke(new Action(RefreshDrives));
+            }
+        }
+
+        void UpdateDeleteProgress(DeleteJob j)
+        {
+            long files = Interlocked.Read(ref j.FilesDeleted), recycled = Interlocked.Read(ref j.Recycled), bytes = Interlocked.Read(ref j.BytesDeleted);
+            int errors;
+            lock (j.Errors) errors = j.Errors.Count;
+            string text;
+            if (j.Stop) text = "Stopping... (finishing the current file)";
+            else if (deleteRecycle) text = string.Format("Moving to the Recycle Bin: {0:N0} item{1} moved", recycled, recycled == 1 ? "" : "s");
+            else text = string.Format("Deleting permanently: {0:N0} file{1} removed, {2} freed", files, files == 1 ? "" : "s", Fmt.Size(bytes));
+            if (errors > 0) text += string.Format("  --  {0:N0} could not be deleted", errors);
+            double frac = !deleteRecycle && deleteTotalFiles > 0 ? Math.Min(0.99, (double)(files + errors) / deleteTotalFiles) : -1;
+            deleteBar.SetProgress(text, Fmt.Shorten(j.Current, 110), frac);
+            DrainLive(j);
+        }
+
+        /// <summary>Takes what the job has deleted so far and removes those rows from the open list and the folder contents.</summary>
+        void DrainLive(DeleteJob j)
+        {
+            bool any = false;
+            string p;
+            while (j.Gone.TryDequeue(out p)) { liveGone.Add(p.TrimEnd('\\')); any = true; }
+            DeleteTarget t;
+            while (j.Finished.TryDequeue(out t)) { liveDone.Add(t); any = true; }
+            if (!any) return;
+            var page = ActivePage;
+            int removed = RemoveGoneRows(page != null ? page.List : null);
+            if (page == null || page.List != contents) removed += RemoveGoneRows(contents);
+            LiveRowsRemoved += removed;
+            if (removed > 0 && page != null)
+            {
+                if (page.List == contents && current != null) UpdateChart(current);
+                else RefreshChart();
+            }
+        }
+
+        int RemoveGoneRows(SizeListView lv)
+        {
+            if (lv == null || lv.Items.Count == 0) return 0;
+            var gone = new List<int>();
+            for (int i = 0; i < lv.Items.Count; i++)
+                if (RowGone(lv.Items[i].Tag as ItemInfo)) gone.Add(i);
+            if (gone.Count == 0) return 0;
+            lv.BeginUpdate();
+            lv.ResetHover();
+            for (int k = gone.Count - 1; k >= 0; k--) lv.Items.RemoveAt(gone[k]);
+            lv.EndUpdate();
+            return gone.Count;
+        }
+
+        bool RowGone(ItemInfo it)
+        {
+            if (it == null || it.IsSummary || it.IsGroup || it.Data is InstalledApp) return false;
+            if (it.Targets != null && it.Targets.Count > 0)
+                return it.Targets.All(t => liveDone.Contains(t) || (!t.RecycleBin && !t.ContentsOnly && PathGone(t.Path)));
+            if (it.IsDir && it.Dir != null) return PathGone(it.Dir.FullPath);
+            if (it.File != null) return PathGone(it.File.FullPath);
+            return false;
+        }
+
+        /// <summary>The path, or a folder it is in, has been deleted.</summary>
+        bool PathGone(string path)
+        {
+            if (string.IsNullOrEmpty(path) || liveGone.Count == 0) return false;
+            for (string q = path.TrimEnd('\\'); !string.IsNullOrEmpty(q); q = Native.ParentDir(q))
+                if (liveGone.Contains(q)) return true;
+            return false;
+        }
         /// <summary>
         /// After a delete: every target that was attempted, and every delete-list or suggestion entry for the same path, is
         /// measured again from the updated scan. Gone (or emptied) targets leave the delete list and the suggestions; targets

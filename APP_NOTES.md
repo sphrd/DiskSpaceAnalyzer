@@ -169,6 +169,19 @@ patterns (Part 3) are applied through the WinForms mapping below.
   "keep proportions intact, but if smaller than 2% group all of them together." Final rule: own slice for every row of at least
   2 % (true proportions, at most 50); ALL smaller rows form ONE grey slice (at the first small row's place), no minimum count.
 
+- 2026-10-30: (after a Suggestions delete listed 5,000+ failures in C:\Program Files\Microsoft VS Code\...\extensions\copilot\node_modules
+  and C:\Program Files\WindowsApps\MicrosoftWindows.Client.WebExperience...\node_modules) "why? i have VSCode open but for the rest?
+  Also change the deletion page. make it similar to the scanning page, but in a more alerting color (maybe red) and the app should update
+  the view live while deletion is happening. whichever tab it is, whether suggestions or else. i should see the files leaving the list as
+  theyre being deleted. Also the prompt that this cant be undone when deleting permanently has a windows shell default look, change it into
+  apps theme, with an alert sign and the logged detailes in a scrollable box inside." + "all other prompts like the one for apps own
+  uninstaller running, should also be changed into apps theme."
+  Cause: the "node_modules folders" suggestion took every node_modules in the scan, including those shipped inside installed programs
+  (VS Code's built-in Copilot extension lost its node_modules; Windows protected WindowsApps: access denied, nothing removed there).
+  Fixed: only a project's node_modules (package.json beside it), never under Windows, Program Files (incl. WindowsApps), ProgramData,
+  AppData, hidden dot-folders, "resources" or "extensions" folders. General rule: a cleanup suggestion never points inside installed
+  programs or tools.
+
 ## WinForms mapping of the design language
 
 - Tokens and fonts live only in `Theme.cs`; widgets use those names, no inline hex.
@@ -382,6 +395,17 @@ patterns (Part 3) are applied through the WinForms mapping below.
   MSI `HKCR\Installer\Products\<packed code>\ProductIcon` -> main exe in the program folder (or one level down; named like the
   app, else the largest; skips unins/setup/update/helper) -> folder icon. Store apps: `Square44x44Logo` (or `<Logo>`) from
   AppxManifest.xml, the scaled file closest to the size, unplated preferred, no contrast variants. macOS: `NSWorkspace.icon(forFile:)`.
+- **Deleting (v1.8.2):** red delete strip = `ScanBar(danger: true)` docked under the scan bar: DANGER_BG fill, DANGER_BORDER outline,
+  DANGER spinner and progress bar (files done / files in the targets from the scan), DANGER_FG detail line (current path), **Stop**
+  (`DeleteJob.Stop`: finishes the current file; the rest is untouched and rescanned). No overlay: the window stays browsable, actions
+  that change the disk are disabled (`busy`). `DeleteJob.Gone` (every deleted file/folder) and `Finished` (targets) are drained on the
+  150 ms UI timer; rows of the open list and of Contents whose path (or a parent folder) is gone, or whose targets are all finished,
+  are removed and the chart rebuilt. `RunDelete` is shared by ConfirmAndDelete and RemoveLeftovers.
+- **Prompts:** every prompt is `AlertForm` (About frame): warning sign (`Theme.DrawWarningSign`, DANGER for permanent deletes and
+  uninstalls, WARN for warnings/errors) or the logo, heading (13 pt bold), body, amber note, `DetailsBox` (rounded SURFACE box, pill
+  scrollbars both ways, path then muted size/reason after a tab, Ctrl+C copies, **Copy list** button), buttons bottom right; destructive
+  primary is red (`ButtonKind.Danger`), Enter/Escape cancel on destructive prompts. Only the startup-crash box stays a MessageBox.
+- **Gotcha:** `RoundButton.MinChars` replaced the text width (long primary labels were cut: "Delete perm..."); it is a minimum now.
 - **Gotcha:** `Directory.GetDirectories` on .NET 4 (no 4.6.2 target) rejects `\\?\` paths; the leftover search silently found
   nothing until it used plain paths (these roots are short).
 - **Chart centre** shows the shown folder's name and size (not "Total"); in Contents it is clickable and goes up one

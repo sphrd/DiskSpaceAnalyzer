@@ -54,7 +54,7 @@ namespace DiskSpaceAnalyzer
             if (error != null)
             {
                 statusLabel.Text = "Export failed.";
-                MessageBox.Show(this, "Could not save the export:\n" + error.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Alert(AlertIcon.Warn, "Could not save the export", error.Message, null, null, "OK");
                 return;
             }
             statusLabel.Text = "Exported to " + file;

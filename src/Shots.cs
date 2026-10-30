@@ -101,6 +101,23 @@ namespace DiskSpaceAnalyzer
             await Task.Delay(300);
         }
 
+        async Task ShotDialog(Form dlg, string name)
+        {
+            using (dlg)
+            {
+                dlg.StartPosition = FormStartPosition.Manual;
+                dlg.Location = new Point(Left + 80, Top + 80);
+                dlg.Show(this);
+                await Task.Delay(800);
+                using (var bmp = new Bitmap(dlg.Width, dlg.Height))
+                {
+                    using (var g = Graphics.FromImage(bmp)) { IntPtr hdc = g.GetHdc(); PrintWindow(dlg.Handle, hdc, 2); g.ReleaseHdc(hdc); }
+                    bmp.Save(Path.Combine(ShotDir, name + ".png"), ImageFormat.Png);
+                }
+                dlg.Close();
+            }
+        }
+
         async void RunShots()
         {
             try
@@ -168,6 +185,20 @@ namespace DiskSpaceAnalyzer
                     }
                     about.Close();
                 }
+                // Prompts and the delete strip (made-up items, nothing is deleted).
+                var sample = Enumerable.Range(1, 40).Select(k => string.Format(@"E:\Projects\web-app-{0}\node_modules{1}{2}", k, "\t", Fmt.Size(180000000L - k * 3100000L))).ToList();
+                await ShotDialog(new AlertForm(AlertIcon.Danger, "Delete 40 items permanently?",
+                    Fmt.Size(sample.Count * 120000000L) + " will be deleted. This bypasses the Recycle Bin and cannot be undone.", null, sample, "Delete permanently", "Cancel"),
+                    (pages.Count + 3) + "-delete-confirm");
+                var errs = Enumerable.Range(1, 30).Select(k => string.Format(@"E:\Projects\web-app-{0}\node_modules\.bin\esbuild.exe{1}The process cannot access the file because it is being used by another process", k, "\t")).ToList();
+                await ShotDialog(new AlertForm(AlertIcon.Warn, "30 items could not be deleted", "They are in use by a running program, or access was denied. Everything else was deleted.",
+                    "Run as administrator (toolbar) to remove items that need it.", errs, "OK"), (pages.Count + 4) + "-delete-errors");
+                if (ShotDemo) { measure.SelectedIndex = 0; await Task.Delay(1200); }
+                deleteBar.Start("Deleting permanently...");
+                deleteBar.SetProgress("Deleting permanently: 48,213 files removed, 6.42 GB freed", @"E:\Projects\web-app-7\node_modules\typescript\lib\lib.dom.d.ts", 0.42);
+                await Task.Delay(800);
+                SaveShot((pages.Count + 5) + "-deleting");
+                deleteBar.Stop();
             }
             catch (Exception ex) { try { File.WriteAllText(Path.Combine(ShotDir, "error.txt"), ex.ToString()); } catch (Exception) { } }
             Close();
@@ -189,7 +220,7 @@ namespace DiskSpaceAnalyzer
                 var top = root;
                 for (int i = 0; i < 20 && chart.MorphFrames < 8; i++) await Task.Delay(100);
                 check(chart.Morphs == 1 && chart.MorphFrames >= 8, "chart: the logo turned into the chart after the scan (" + chart.MorphFrames + " frames)");
-                check(top != null && top.Files == 9 && top.Dirs == 8, string.Format("scan: {0} files, {1} folders (expected 9, 8)", top != null ? top.Files : -1, top != null ? top.Dirs : -1));
+                check(top != null && top.Files == 10 && top.Dirs == 8, string.Format("scan: {0} files, {1} folders (expected 10, 8)", top != null ? top.Files : -1, top != null ? top.Dirs : -1));
 
                 // Chart: every row of at least 2 % of the total (7.2 degrees) has a slice of its own, in true proportion;
                 // all smaller rows together form one grey "smaller items" slice.
@@ -236,7 +267,7 @@ namespace DiskSpaceAnalyzer
                 var a = FindScanned(P("A"), true);
                 var e = FindScanned(P(@"E\deep"), true);
                 check(a != null && a.LocalFiles == 3, "live: new file in A noticed");
-                check(e != null && e.Files == 1 && root.Files == 11, "live: new folder E\\deep with its file noticed (total " + root.Files + " files)");
+                check(e != null && e.Files == 1 && root.Files == 12, "live: new folder E\\deep with its file noticed (total " + root.Files + " files)");
 
                 // Live: a file in a folder whose path is longer than 260 characters (crashed v1.7.0).
                 string longDir = P(@"L\" + new string('x', 120) + @"\" + new string('y', 120) + @"\" + new string('z', 40));
@@ -249,7 +280,7 @@ namespace DiskSpaceAnalyzer
                 check(root.Files == 12 && FindScanned(longDir, true) != null, "live: a file in a " + longDir.Length + "-character path noticed, no crash");
                 new DeleteJob().DeleteDirectory(P("L"));
                 for (int i = 0; i < 40 && root.Files != 11; i++) await Task.Delay(250);
-                check(root.Files == 11, "live: the long folder removed again");
+                check(root.Files == 12, "live: the long folder removed again");
 
                 // Duplicates: dup1.bin and dup2.bin are identical; other.bin has the same size but other content.
                 SelectDir(root);
@@ -264,6 +295,22 @@ namespace DiskSpaceAnalyzer
                 var sug = await Task.Factory.StartNew(() => FindSuggestions(roots.Where(r => r.Node != null).Select(r => r.Node).ToList()));
                 var nm = sug.FirstOrDefault(s => s.Name == "node_modules folders");
                 check(nm != null && nm.Targets.Count == 1 && SamePath(nm.Targets[0].Path, P(@"P\node_modules")), "suggestions: node_modules of P found");
+                // Never the node_modules of installed programs or tools (VS Code's bundled extensions, Electron apps, editor extensions).
+                {
+                    Directory.CreateDirectory(P(@"Tool\resources\app"));
+                    File.WriteAllText(P(@"Tool\resources\app\package.json"), "{}");
+                    Directory.CreateDirectory(P(@"Home\.vscode\extensions\x"));
+                    File.WriteAllText(P(@"Home\.vscode\extensions\x\package.json"), "{}");
+                    Directory.CreateDirectory(P("NoPkg"));
+                    string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                    bool ok = IsProjectModules(P(@"P\node_modules")) && !IsProjectModules(P(@"Tool\resources\app\node_modules")) &&
+                              !IsProjectModules(P(@"Home\.vscode\extensions\x\node_modules")) && !IsProjectModules(P(@"NoPkg\node_modules")) &&
+                              !IsProjectModules(Path.Combine(pf, @"Microsoft VS Code\resources\app\extensions\copilot\node_modules"));
+                    check(ok, "suggestions: node_modules only of projects (package.json), never in Program Files, resources\\app, .vscode, extensions");
+                    Directory.Delete(P("Tool"), true);
+                    Directory.Delete(P("Home"), true);
+                    Directory.Delete(P("NoPkg"), true);
+                }
 
                 // Delete list: folder B to the Recycle Bin on CI (permanently here, to keep the user's bin clean).
                 bool ci = Environment.GetEnvironmentVariable("CI") != null;
@@ -277,9 +324,16 @@ namespace DiskSpaceAnalyzer
                 check(job != null && !Directory.Exists(P("B")) && FindScanned(P("B"), true) == null && root.Files == before - 2,
                     (ci ? "Recycle Bin" : "permanent delete") + ": folder B gone from disk and scan (" + root.Files + " files left)");
 
-                // Contents only: A stays, its files and subfolder go.
+                // Contents only: A stays, its files and subfolder go. A is open in Contents: its rows leave the list while the job
+                // runs (before the scan is updated), and the red delete strip goes away at the end.
                 var aNode = FindScanned(P("A"), true);
+                viewTabs.SelectedIndex = pages.IndexOf(pContents);
+                SelectDir(aNode);
+                await Task.Delay(300);
+                int aRows = contents.Items.Count;
                 job = await ConfirmAndDelete(new List<DeleteTarget> { new DeleteTarget { Path = aNode.FullPath, IsDir = true, ContentsOnly = true, Dir = aNode, Label = "A" } }, false);
+                check(aRows >= 3 && LiveRowsRemoved >= 3 && !deleteBar.Visible && !busy,
+                    string.Format("live delete: {0} of {1} rows left the open list as their files went; the delete strip closed", LiveRowsRemoved, aRows));
                 aNode = FindScanned(P("A"), true);
                 check(Directory.Exists(P("A")) && Directory.GetFileSystemEntries(P("A")).Length == 0 && aNode != null && aNode.Files == 0 && aNode.Dirs == 0,
                     "contents only: A kept and emptied, in the scan too");
@@ -289,7 +343,16 @@ namespace DiskSpaceAnalyzer
                 var other = Scanner.ListFiles(c).First(f => f.Name == "other.bin");
                 job = await ConfirmAndDelete(new List<DeleteTarget> { new DeleteTarget { Path = other.FullPath, File = other, Label = other.Name, Size = other.Size } }, false);
                 check(!File.Exists(P(@"C\other.bin")) && c.FileList.All(f => f.Name != "other.bin") && c.LocalFiles == 1, "file delete: other.bin gone from disk and index");
-                check(root.Files == 4, "totals after deletes: " + root.Files + " files (expected 4)");
+                check(root.Files == 5, "totals after deletes: " + root.Files + " files (expected 5)");
+
+                // Prompts are the themed dialog: warning sign, the full list in a scrollable box, a red primary button.
+                using (var dlg = new AlertForm(AlertIcon.Danger, "Delete 30 items permanently?", "Test", null,
+                    Enumerable.Range(1, 30).Select(k => @"C:\x\item" + k + "\t1 KB").ToList(), "Delete permanently", "Cancel"))
+                {
+                    var primary = dlg.Buttons.FirstOrDefault(x => x.Text == "Delete permanently");
+                    check(dlg.Details != null && dlg.Details.LineCount == 30 && primary != null && primary.Kind == ButtonKind.Danger,
+                        "prompts: themed dialog with all 30 items in its details box and a red Delete permanently button");
+                }
 
                 // Size on disk: every non-empty file takes at least one cluster.
                 SetMeasure(true);
@@ -462,7 +525,7 @@ namespace DiskSpaceAnalyzer
         }
     }
 
-    /// <summary>Builds the self-test folder: 9 files in 8 folders, two identical files, a node_modules folder.</summary>
+    /// <summary>Builds the self-test folder: 10 files in 8 folders, two identical files, a project (package.json) with node_modules.</summary>
     internal static class SelfTest
     {
         [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
@@ -502,6 +565,7 @@ namespace DiskSpaceAnalyzer
             Directory.CreateDirectory(Path.Combine(dir, "D"));
             File.Copy(Path.Combine(dir, @"C\dup1.bin"), Path.Combine(dir, @"D\dup2.bin"));
             make(@"C\other.bin", 200000);
+            make(@"P\package.json", 100);
             make(@"P\node_modules\x\index.js", 4000);
             return dir;
         }

@@ -42,6 +42,8 @@ namespace DiskSpaceAnalyzer
         bool scanning;
         ScanRoot scanRoot;
         ScanBar scanBar;
+        /// <summary>Red delete progress strip (same place and shape as the scan bar).</summary>
+        ScanBar deleteBar;
         UpdateManager updates;
         /// <summary>Scanned tree of the root that holds the current selection (null when that root is not scanned).</summary>
         DirNode root { get { return active != null ? active.Node : null; } }
@@ -290,6 +292,14 @@ namespace DiskSpaceAnalyzer
                 scanner.Cancel();
                 scanBar.CancelButton.Enabled = false;
             };
+            deleteBar = new ScanBar(true) { Dock = DockStyle.Top };
+            deleteBar.CancelButton.Click += (s, e) =>
+            {
+                var j = deleteJob;
+                if (j == null) return;
+                j.Stop = true;
+                deleteBar.CancelButton.Enabled = false;
+            };
             // Custom title bar (logo, name, menu items, window buttons) replacing the native caption. It spans the full
             // width, so it is placed at (0, 0) and anchored instead of docked (docking would respect the side padding).
             titleBar = new TitleBar();
@@ -301,6 +311,7 @@ namespace DiskSpaceAnalyzer
             TextChanged += (s, e) => titleBar.Invalidate();
 
             Controls.Add(split);
+            Controls.Add(deleteBar);
             Controls.Add(scanBar);
             Controls.Add(toolbar);
             Controls.Add(status);
@@ -504,10 +515,10 @@ namespace DiskSpaceAnalyzer
             if (busy || scanning) return;
             string path;
             try { path = NormalizePath(pathBox.Text); }
-            catch (Exception ex) { MessageBox.Show(this, "Invalid path: " + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+            catch (Exception ex) { Alert(AlertIcon.Warn, "That is not a valid path", ex.Message, null, null, "OK"); return; }
             if (!Directory.Exists(path))
             {
-                MessageBox.Show(this, "Folder not found:\n" + path, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Alert(AlertIcon.Warn, "Folder not found", path, null, null, "OK");
                 return;
             }
             pathBox.Text = path;
@@ -544,7 +555,7 @@ namespace DiskSpaceAnalyzer
             {
                 if (isNew) roots.Remove(r);
                 RefreshTree(current);
-                MessageBox.Show(this, "Scan failed: " + error.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Alert(AlertIcon.Warn, "The scan failed", error.Message, null, null, "OK");
                 return;
             }
 
@@ -883,9 +894,7 @@ namespace DiskSpaceAnalyzer
                 else
                     scanBar.SetProgress(string.Format("Scanning {0}: {1} so far", Fmt.Shorten(s.RootPath ?? where, 60), Fmt.Size(bytes)), detail, -1);
             }
-            if (j != null)
-                overlay.SetStatus(j.Recycled > 0 ? string.Format("Moving to the Recycle Bin: {0:N0} items moved", Interlocked.Read(ref j.Recycled))
-                    : string.Format("Deleting: {0:N0} files removed", Interlocked.Read(ref j.FilesDeleted)), Fmt.Shorten(j.Current, 80));
+            if (j != null && deleteBar.Visible) UpdateDeleteProgress(j);
         }
 
         void UpdateDriveLabel()

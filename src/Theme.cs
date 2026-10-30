@@ -29,6 +29,12 @@ namespace DiskSpaceAnalyzer
         public static readonly Color WARN_FG = Hex(0xffd27a);
         public static readonly Color WARN_BG = Hex(0x3d3522);
         public static readonly Color WARN_BORDER = Hex(0x5a4a2a);
+        /// <summary>Destructive actions: permanent deletes, uninstalls, the delete progress strip.</summary>
+        public static readonly Color DANGER = Hex(0xe5534b);
+        public static readonly Color DANGER_HOVER = Hex(0xf47067);
+        public static readonly Color DANGER_BG = Hex(0x3b2427);
+        public static readonly Color DANGER_BORDER = Hex(0x6b2e30);
+        public static readonly Color DANGER_FG = Hex(0xffb3ad);
         // Suggestions (space that can be freed): the one place that gets its own hue, so the tab stands out.
         public static readonly Color SUGGEST = Hex(0x4cc38a);
         public static readonly Color PILL = Hex(0x5c6470);
@@ -105,6 +111,26 @@ namespace DiskSpaceAnalyzer
             using (var b = new SolidBrush(Color.FromArgb(a, LOGO_TOP_LEFT))) g.FillPie(b, circle, 180 + mouth, 90 - mouth + under);
             using (var b = new SolidBrush(Color.FromArgb(a, LOGO_BOTTOM_LEFT))) g.FillPie(b, circle, 90 - under, 90 - mouth + under);
             using (var b = new SolidBrush(Color.FromArgb(a, LOGO_RIGHT))) g.FillPie(b, circle, -90, 180);
+        }
+
+        /// <summary>Warning sign: a rounded triangle in c with a BG exclamation mark (bar and dot).</summary>
+        public static void DrawWarningSign(Graphics g, Rectangle r, Color c)
+        {
+            var sm = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float w = r.Width, h = w * 0.88f, x = r.X, y = r.Y + (r.Height - h) / 2, rad = w * 0.09f;
+            var pts = new[] { new PointF(x + w / 2, y), new PointF(x + w, y + h), new PointF(x, y + h) };
+            using (var path = new GraphicsPath())
+            {
+                path.AddPolygon(pts);
+                using (var b = new SolidBrush(c)) g.FillPath(b, path);
+                using (var pen = new Pen(c, rad * 2) { LineJoin = LineJoin.Round }) g.DrawPath(pen, path);
+            }
+            float cx = x + w / 2, bw = w * 0.11f;
+            using (var pen = new Pen(BG, bw) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawLine(pen, cx, y + h * 0.36f, cx, y + h * 0.66f);
+            using (var b = new SolidBrush(BG)) g.FillEllipse(b, cx - bw * 0.62f, y + h * 0.78f - bw * 0.62f, bw * 1.24f, bw * 1.24f);
+            g.SmoothingMode = sm;
         }
 
         /// <summary>Circular arrow (refresh / rescan): a ~300° arc open at the top right, with an arrowhead at its end.</summary>

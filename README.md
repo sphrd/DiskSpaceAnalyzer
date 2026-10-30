@@ -46,7 +46,8 @@ open list, and hovering a slice highlights its row and the other way round)
   together form one grey "N smaller items" slice.
 - **Suggestions** (the green tab next to Contents): how much can be freed, in
   large print, and what: the Recycle Bin / Trash, temporary files, caches
-  (browsers, developer tools, Xcode, Homebrew...), `node_modules` folders, old
+  (browsers, developer tools, Xcode, Homebrew...), the `node_modules` folders of
+  your own projects (never those inside installed programs or editors), old
   installers in Downloads, and more, each with what deleting it means. Expand a
   suggestion to see every location, check exactly what you want (**Select all** /
   **Deselect all**) and **Delete permanently** right there. Safe items start
@@ -82,10 +83,20 @@ open list, and hovering a slice highlights its row and the other way round)
   **Move to Recycle Bin / Trash** (can be undone) or **Delete permanently**
   (frees the space now). If some files are in use, the list keeps what is left,
   with its real size.
-- Or delete straight from any list, always after a confirmation that shows the
-  items and their total size, with a warning for system folders.
+- Or delete straight from any list. A confirmation always comes first, with a
+  warning sign, the total size and **every** item in a scrollable list (plus a
+  warning for Windows / Program Files content); **Copy list** copies it.
+- **Watch it go:** a red progress strip (where the scan progress shows) counts
+  the files removed and the space freed, and **Stop** halts it after the current
+  file. Whatever tab is open, items leave the list as they are deleted, and the
+  chart follows. What could not be deleted (in use, access denied) is listed
+  afterwards with the reason for each item.
 - Links are never followed, so nothing outside what you picked is touched; very
   long paths work; caches are emptied and files in use are skipped.
+
+![Deleting: the red progress strip while the list empties (demo data)](assets/screenshot-deleting.png)
+
+![The confirmation before a permanent delete, listing every item (demo data)](assets/screenshot-delete-confirm.png)
 
 **And**
 
