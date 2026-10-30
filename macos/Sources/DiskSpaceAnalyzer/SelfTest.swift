@@ -184,7 +184,7 @@ final class SelfTestRun {
             let noPackage = project("loose", packageJson: false)
             let found = MainWindowController.projectNodeModules(Scanner().run(nmDir)).map { $0.fullPath }
             self.check(found.count == 1 && PathUtil.same(found[0], own) && MainWindowController.isProjectNodeModules(own),
-                       "node_modules safety: a project's node_modules (package.json next to it) is suggested (\(found.count) found)")
+                       "node_modules safety: a project's node_modules (package.json next to it) is suggested (found \(found), expected \(own), allowed \(MainWindowController.isProjectNodeModules(own)))")
             self.check(!MainWindowController.isProjectNodeModules(inApp) && !found.contains { PathUtil.same($0, inApp) },
                        "node_modules safety: not inside an app bundle (X.app/Contents/Resources/app)")
             self.check(!MainWindowController.isProjectNodeModules(inExt) && !found.contains { PathUtil.same($0, inExt) },
@@ -253,7 +253,9 @@ final class SelfTestRun {
         steps.add { next in
             guard let s = self.find("S"), s.children.count == 4 else { self.check(false, "delete strip: folder S not noticed"); next(); return }
             if let i = w.pages.firstIndex(where: { $0 === w.pContents }) { w.viewTabs.selectedIndex = i }
-            w.selectDir(s)
+            // The tree may not show S yet (live changes reach it a little later): reload it with S open.
+            w.refreshTree(s)
+            if w.current !== s { w.showContents(s) }
             let rows = { w.pContents.items.filter { $0.isDir && $0.dir?.parent === s }.count }
             let before = rows()
             let targets = s.children.map { c -> DeleteTarget in
