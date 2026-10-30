@@ -1,6 +1,6 @@
 import AppKit
 
-enum ButtonKind { case primary, secondary, warn }
+enum ButtonKind { case primary, secondary, warn, danger }
 
 /// Flat rounded button (radius 8; compact: 9 pt text, radius 7, tighter padding). The action fires on mouse-up inside
 /// the button. An icon button (refresh) is square, as high as its neighbours, and draws a circular arrow.
@@ -14,6 +14,8 @@ final class RoundButton: NSView {
     var isEnabled = true { didSet { needsDisplay = true; window?.invalidateCursorRects(for: self) } }
     var onClick: (() -> Void)?
     var tip: String? { didSet { toolTip = tip } }
+    /// Accent outline: the button Return presses in a dialog.
+    var ring = false { didSet { needsDisplay = true } }
     private var hover = false, pressed = false
 
     init(_ title: String, _ kind: ButtonKind, _ action: (() -> Void)? = nil) {
@@ -61,10 +63,11 @@ final class RoundButton: NSView {
             switch kind {
             case .primary: fill = hover ? T.ACCENT_ACTIVE : T.ACCENT; fore = T.BG
             case .warn: fill = hover ? T.WARN_FG : T.WARN; fore = T.BG
+            case .danger: fill = hover ? T.DANGER_HOVER : T.DANGER; fore = T.BG
             case .secondary: fill = hover ? T.SECONDARY_HOVER : T.BORDER; fore = T.FG
             }
         }
-        Theme.fillRound(bounds, compact ? 7 : 8, fill: fill)
+        Theme.fillRound(bounds, compact ? 7 : 8, fill: fill, outline: ring && isEnabled ? T.ACCENT : nil)
         if isIcon { RoundButton.drawRefresh(bounds, fore); return }
         Theme.drawText(title, in: bounds.insetBy(dx: compact ? 6 : 8, dy: 0), font: font, color: fore, align: .center)
     }
@@ -98,7 +101,8 @@ final class RoundButton: NSView {
 final class Spinner: NSView {
     private var timer: Timer?
     private var angle: CGFloat = 0
-    var background: NSColor = T.SURFACE
+    var background: NSColor = T.SURFACE { didSet { needsDisplay = true } }
+    var color: NSColor = T.ACCENT { didSet { needsDisplay = true } }
     override var isFlipped: Bool { true }
 
     var spinning: Bool {
@@ -121,17 +125,29 @@ final class Spinner: NSView {
         let p = NSBezierPath()
         p.appendArc(withCenter: NSPoint(x: r.midX, y: r.midY), radius: r.width / 2, startAngle: angle, endAngle: angle + 120, clockwise: false)
         p.lineWidth = w; p.lineCapStyle = .round
-        T.ACCENT.setStroke(); p.stroke()
+        color.setStroke(); p.stroke()
     }
 }
 
 /// Non-blocking progress strip under the toolbar: spinner, status line, detail line, pill bar (when the total is
-/// known) and Cancel. The rest of the window stays usable while it shows.
+/// known) and Cancel. The rest of the window stays usable while it shows. The danger variant (deleting) has a red
+/// outline on a dark red fill, a red spinner and bar, and a Stop button.
 final class ScanBar: NSView {
     let spinner = Spinner()
     let cancelButton = RoundButton("Cancel", .secondary)
-    private var status = "", detail = ""
-    private var fraction: Double = -1
+    private(set) var status = "", detail = ""
+    private(set) var fraction: Double = -1
+    var danger = false {
+        didSet {
+            spinner.color = danger ? T.DANGER : T.ACCENT
+            spinner.background = danger ? T.DANGER_BG : T.SURFACE
+            cancelButton.title = danger ? "Stop" : "Cancel"
+            needsDisplay = true
+        }
+    }
+    var fillColor: NSColor { danger ? T.DANGER_BG : T.SURFACE }
+    var outlineColor: NSColor { danger ? T.DANGER_BORDER : T.BORDER }
+    var barColor: NSColor { danger ? T.DANGER : T.ACCENT }
     override var isFlipped: Bool { true }
 
     override init(frame: NSRect) {
@@ -173,7 +189,7 @@ final class ScanBar: NSView {
     override func draw(_ dirtyRect: NSRect) {
         T.BG.setFill(); bounds.fill()
         let b = box
-        Theme.fillRound(b, 12, fill: T.SURFACE, outline: T.BORDER)
+        Theme.fillRound(b, 12, fill: fillColor, outline: outlineColor)
         let x = spinner.frame.maxX + 12, right = cancelButton.frame.minX - 16
         let lineH: CGFloat = 17, smallH: CGFloat = 15, barH: CGFloat = 6
         let total = lineH + 2 + smallH + (fraction >= 0 ? 6 + barH : 0)
@@ -184,9 +200,9 @@ final class ScanBar: NSView {
         if fraction >= 0 {
             y += smallH + 6
             let bar = NSRect(x: x, y: y, width: max(0, right - x), height: barH)
-            Theme.fillRound(bar, barH / 2, fill: T.BORDER)
+            Theme.fillRound(bar, barH / 2, fill: outlineColor)
             let w = (bar.width * CGFloat(min(1, fraction))).rounded()
-            if w > 0 { Theme.fillRound(NSRect(x: bar.minX, y: bar.minY, width: max(w, barH), height: barH), barH / 2, fill: T.ACCENT) }
+            if w > 0 { Theme.fillRound(NSRect(x: bar.minX, y: bar.minY, width: max(w, barH), height: barH), barH / 2, fill: barColor) }
         }
     }
 }

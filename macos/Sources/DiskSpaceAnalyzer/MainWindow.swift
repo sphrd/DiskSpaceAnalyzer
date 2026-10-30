@@ -170,6 +170,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     var scanner: Scanner?
     var scanRoot: ScanRoot?
     var deleteJob: DeleteJob?
+    var deleteFinished = Set<String>()     // targets of the running delete that are done
+    var deleteTargetPaths: [String] = []   // the running delete's targets
+    var deleteRowsRemoved = 0              // rows that left the lists while it ran
     var scanning = false
     var busy = false
     var drivesChanged = false
@@ -211,7 +214,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     let liveLabel = NSTextField(labelWithString: "")
     let driveLabel = NSTextField(labelWithString: "")
     lazy var versionLink = LinkLabel("v" + Updater.currentString) { [unowned self] in self.updates.check(manual: true) }
-    let overlay = BusyOverlay()
+    let deleteBar = ScanBar()
     let contextMenu = NSMenu()
     lazy var updates = UpdateController(parent: window)
     var splitPositioned = false, split2Positioned = false
@@ -409,7 +412,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         chart.onHover = { [unowned self] i in
             self.activePage.table.setHighlight(i >= 0 && i < self.chart.slices.count ? self.chart.slices[i].rows : [])
         }
-        chart.onClick = { [unowned self] s in if let d = s.dir, !self.busy, self.isAttached(d) { self.selectDir(d) } }
+        chart.onClick = { [unowned self] s in if let d = s.dir, self.isAttached(d) { self.selectDir(d) } }
         chart.onCenterClick = { [unowned self] in if self.activePage === self.pContents { self.goUp() } }
 
         split2.isVertical = true
@@ -445,8 +448,15 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         contextMenu.delegate = self
         contextMenu.appearance = NSAppearance(named: .darkAqua)
 
-        root.addSubview(overlay)
-        overlay.isHidden = true
+        // Deleting: the strip stays in the toolbar area (danger colours); the window stays browsable meanwhile.
+        deleteBar.danger = true
+        deleteBar.cancelButton.tip = "Stop deleting after the current file; whatever was not deleted yet stays"
+        deleteBar.cancelButton.onClick = { [unowned self] in
+            guard let j = self.deleteJob, !j.stopped else { return }
+            j.stop()
+            self.deleteBar.cancelButton.isEnabled = false
+        }
+        root.addSubview(deleteBar)
 
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(volumesChanged), name: NSWorkspace.didMountNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(volumesChanged), name: NSWorkspace.didUnmountNotification, object: nil)
@@ -497,10 +507,10 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         btnExport.frame = NSRect(x: measure.frame.minX - 16 - es.width, y: y, width: es.width, height: h)
         y += h + 10
         if !scanBar.isHidden { scanBar.frame = NSRect(x: m, y: y, width: b.width - 2 * m, height: ScanBar.height); y += ScanBar.height }
+        if !deleteBar.isHidden { deleteBar.frame = NSRect(x: m, y: y, width: b.width - 2 * m, height: ScanBar.height); y += ScanBar.height }
         let statusH: CGFloat = 28
         split.frame = NSRect(x: m, y: y, width: b.width - 2 * m, height: max(100, b.height - y - statusH))
         layoutStatus()
-        overlay.frame = b
         if !splitPositioned && split.frame.width > 300 {
             splitPositioned = true
             let w = split.frame.width
@@ -630,7 +640,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         if path.count > 1 && path.hasSuffix("/") { path.removeLast() }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
-            alert("Folder not found:\n" + path); return
+            alert("Folder not found", path); return
         }
         pathField.stringValue = path
         pathField.currentEditor()?.selectedRange = NSRange(location: path.count, length: 0)
@@ -724,8 +734,17 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     func setBusy(_ on: Bool) {
         busy = on
-        if on { overlay.show("Starting..."); startProgressTimer() }
-        else { overlay.hide(); if !scanning { stopProgressTimer() } }
+        if on {
+            deleteBar.start(deleteJob?.trash == true ? "Moving to the Trash..." : "Deleting permanently...")
+            deleteBar.cancelButton.isEnabled = true
+            startProgressTimer()
+            for p in pages { p.rowFilter = { [unowned self] it in self.rowDeleted(it) || self.rowGoneFromDisk(it) } }
+        } else {
+            deleteBar.stop()
+            if !scanning { stopProgressTimer() }
+            for p in pages { p.rowFilter = nil }
+        }
+        layoutRoot()
         updateButtons()
         if !on && drivesChanged { DispatchQueue.main.async { self.volumesChanged() } }
     }
@@ -736,7 +755,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
     }
     private func stopProgressTimer() { progressTimer?.invalidate(); progressTimer = nil }
 
-    private func updateProgress() {
+    func updateProgress() {
         if let s = scanner {
             let bytes = s.bytesSeen
             let detail = "\(Fmt.count(s.filesSeen)) files, \(Fmt.count(s.dirsSeen)) folders  --  \(Fmt.shorten(s.current, 90))"
@@ -747,8 +766,14 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
             } else { scanBar.set("Scanning \(Fmt.shorten(s.rootPath, 60)): \(Fmt.size(bytes)) so far", detail, -1) }
         }
         if let j = deleteJob {
-            let moved = j.recycled
-            overlay.set(moved > 0 ? "Moving to the Trash: \(Fmt.count(moved)) items moved" : "Deleting: \(Fmt.count(j.filesDeleted)) files removed", Fmt.shorten(j.current, 80))
+            let done = j.bytesDone, total = j.totalBytes
+            var status = j.trash ? "Moving to the Trash: \(Fmt.count(j.recycled)) item\(j.recycled == 1 ? "" : "s")"
+                                 : "Deleting permanently: \(Fmt.count(j.filesDeleted)) file\(j.filesDeleted == 1 ? "" : "s") removed, \(Fmt.size(done)) freed"
+            if j.stopped { status += "  -  stopping after the current file..." }
+            let frac = total > 0 ? min(1, Double(done) / Double(total)) : -1
+            deleteBar.set(status, Fmt.shorten(j.current, 160), frac)
+            let d = j.drain()
+            applyDeleted(d.gone, d.finished)
         }
     }
 
@@ -758,9 +783,9 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         btnScan.isEnabled = idle
         btnBrowse.isEnabled = idle
         pathField.isEnabled = !busy
-        btnUp.isEnabled = !busy && current?.parent != nil
+        btnUp.isEnabled = current?.parent != nil
         btnRescan.isEnabled = idle && current != nil
-        btnFinder.isEnabled = !busy && (current != nil || active != nil)
+        btnFinder.isEnabled = current != nil || active != nil
         btnDelete.isEnabled = idle && any
         btnAddList.isEnabled = !busy && any
         btnExport.isEnabled = !busy && any
@@ -1012,7 +1037,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
 
     func openSelected() {
         let sel = selection()
-        guard sel.count == 1, !busy else { return }
+        guard sel.count == 1 else { return }
         let it = sel[0]
         if it.isDir, let d = it.dir { if isAttached(d) { selectDir(d) }; return }
         guard let f = it.file else { showInFinder(); return }
@@ -1030,7 +1055,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         showInFinder()
     }
 
-    func goUp() { if !busy, let p = current?.parent { selectDir(p) } }
+    func goUp() { if let p = current?.parent { selectDir(p) } }
 
     func showInFinder() {
         let sel = selection()
@@ -1071,8 +1096,8 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         m.removeAllItems()
         if let v = window?.firstResponder as? NSView, v === outline || pages.contains(where: { $0.table === v }) { lastView = v }
         let sel = selection()
-        let any = !sel.isEmpty && !busy
-        let deletable = any && sel.allSatisfy { $0.canDelete }
+        let any = !sel.isEmpty
+        let deletable = any && !busy && sel.allSatisfy { $0.canDelete }
         func add(_ title: String, _ key: String, _ mods: NSEvent.ModifierFlags, _ enabled: Bool, _ action: Selector, warn: Bool = false) {
             let it = NSMenuItem(title: title, action: action, keyEquivalent: key)
             if !key.isEmpty { it.keyEquivalentModifierMask = mods }
@@ -1090,7 +1115,7 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         add("Open", "", [], any && sel.count == 1, #selector(menuOpen))
         add("Show in Finder", "", [], any, #selector(menuFinder))
         add("Copy path", "", [], any, #selector(menuCopy))
-        add("Rescan folder", "r", .command, any && !scanning && sel.count == 1 && sel[0].isDir, #selector(menuRescan))
+        add("Rescan folder", "r", .command, any && !busy && !scanning && sel.count == 1 && sel[0].isDir, #selector(menuRescan))
         m.addItem(.separator())
         if lastView !== pBasket.table { add("Add to delete list", "d", .command, deletable, #selector(menuAddList)) }
         add("Move to Trash...", "", [], deletable && !scanning, #selector(menuTrash))
@@ -1176,13 +1201,6 @@ final class MainWindowController: NSWindowController, NSOutlineViewDataSource, N
         }
     }
 
-    func alert(_ text: String) {
-        let a = NSAlert()
-        a.messageText = "Disk Space Analyzer"
-        a.informativeText = text
-        if let w = window { a.beginSheetModal(for: w) } else { a.runModal() }
-    }
-
     func windowWillClose(_ notification: Notification) { scanner?.cancel(); stopAllWatching(); NSApp.terminate(nil) }
 
     // MARK: Menu bar actions (validated)
@@ -1216,36 +1234,4 @@ final class ChevronButton: NSView {
         T.SURFACE.setFill(); bounds.fill()
         Theme.drawChevron(NSRect(x: (bounds.width - 14) / 2, y: (bounds.height - 14) / 2, width: 14, height: 14), hover ? T.ACCENT : T.MUTED, down: true)
     }
-}
-
-/// Full-window overlay for work that must not be interrupted (deleting).
-final class BusyOverlay: FlatView {
-    private let spinner = Spinner()
-    private let status = NSTextField(labelWithString: "")
-    private let detail = NSTextField(labelWithString: "")
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        fill = T.BG
-        spinner.background = T.BG
-        status.font = Theme.font11; status.textColor = T.FG; status.alignment = .center
-        detail.font = Theme.font9; detail.textColor = T.MUTED; detail.alignment = .center; detail.lineBreakMode = .byTruncatingMiddle
-        addSubview(spinner); addSubview(status); addSubview(detail)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    func show(_ text: String) { status.stringValue = text; detail.stringValue = ""; isHidden = false; spinner.spinning = true; needsLayout = true }
-    func hide() { spinner.spinning = false; isHidden = true }
-    func set(_ text: String, _ d: String) { status.stringValue = text; detail.stringValue = d }
-
-    override func layout() {
-        super.layout()
-        let cx = bounds.midX, top = bounds.midY - 60
-        spinner.frame = NSRect(x: cx - 32, y: top, width: 64, height: 64)
-        status.frame = NSRect(x: cx - 220, y: top + 78, width: 440, height: 20)
-        detail.frame = NSRect(x: cx - 220, y: top + 100, width: 440, height: 16)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { isHidden ? nil : super.hitTest(point) ?? self }
-    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
 }

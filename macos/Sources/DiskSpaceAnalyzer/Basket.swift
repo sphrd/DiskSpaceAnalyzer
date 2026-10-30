@@ -163,37 +163,51 @@ extension MainWindowController {
 
     static let riskyPaths = ["/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/private", "/opt"]
 
-    /// Asks, deletes (or moves to the Trash) with the busy overlay, then updates the scan. done(nil) when cancelled.
+    /// The confirmation before deleting or moving to the Trash: every target on its own line with its size; for a
+    /// permanent delete the red "Delete permanently" button, Cancel the default (Return and Escape).
+    func deleteConfirmDialog(_ targets: [DeleteTarget], trash: Bool) -> PromptDialog {
+        let total = targets.reduce(Int64(0)) { $0 + $1.size }
+        let n = targets.count, s = n == 1 ? "" : "s"
+        let details = targets.map { t -> String in
+            (t.emptyTrash ? "Empty the Trash" : PathUtil.trim(t.path) + (t.contentsOnly ? "  (contents)" : "")) + "   " + Fmt.size(t.size)
+        }
+        var warnings: [String] = []
+        if trash && targets.contains(where: { $0.emptyTrash }) { warnings.append("The Trash itself is emptied: its items are deleted for good.") }
+        if targets.contains(where: { t in !t.contentsOnly && !t.emptyTrash && MainWindowController.riskyPaths.contains { PathUtil.isWithin(t.path, $0) } }) {
+            warnings.append("This includes macOS system, library or application content. Deleting it can break macOS or installed apps.")
+        }
+        if trash {
+            return PromptDialog(icon: .warn, heading: "Move \(Fmt.count(n)) item\(s) to the Trash?",
+                                text: "\(Fmt.size(total)) will be moved to the Trash. You can put the items back from there; the space is freed when the Trash is emptied.",
+                                warning: warnings.joined(separator: "\n"), details: details,
+                                buttons: [("Move to Trash", .primary), ("Cancel", .secondary)], defaultIndex: 1, cancelIndex: 1)
+        }
+        return PromptDialog(icon: .danger, heading: "Delete \(Fmt.count(n)) item\(s) permanently?",
+                            text: "\(Fmt.size(total)) will be deleted. This bypasses the Trash and cannot be undone.",
+                            warning: warnings.joined(separator: "\n"), details: details,
+                            buttons: [("Delete permanently", .danger), ("Cancel", .secondary)], defaultIndex: 1, cancelIndex: 1)
+    }
+
+    /// After a delete: what could not be deleted (each "path  -  reason"), all of them.
+    func deleteErrorsDialog(_ errors: [String], trash: Bool) -> PromptDialog {
+        let n = errors.count
+        var text = n == 1 ? "It is in use or access was denied." : "They are in use or access was denied."
+        if !FullDiskAccess.granted { text += " Tip: give Disk Space Analyzer Full Disk Access (button in the toolbar), then try again." }
+        return PromptDialog(icon: .warn, heading: "\(Fmt.count(n)) item\(n == 1 ? "" : "s") could not be \(trash ? "moved to the Trash" : "deleted")",
+                            text: text, details: errors, buttons: [("OK", .primary)], defaultIndex: 0, cancelIndex: 0)
+    }
+
+    /// Asks, deletes (or moves to the Trash) with the delete strip, then updates the scan. done(nil) when cancelled.
     func confirmAndDelete(_ targets: [DeleteTarget], trash: Bool, _ done: @escaping (DeleteJob?) -> Void) {
         let scannedRoots = roots.compactMap { $0.node?.fullPath }
         if targets.contains(where: { t in !t.emptyTrash && !t.contentsOnly && scannedRoots.contains { PathUtil.same($0, t.path) } }) {
-            alert("A scanned drive or folder itself cannot be deleted here.\nSelect items inside it instead.")
+            alert("A scanned drive or folder cannot be deleted here", "Select items inside it instead.")
             done(nil)
             return
         }
-        let total = targets.reduce(Int64(0)) { $0 + $1.size }
-        var list = targets.prefix(12).map { t -> String in
-            "    " + (t.emptyTrash ? "Empty the Trash" : Fmt.shorten(t.path, 90) + (t.contentsOnly ? "  (contents)" : "")) + "   (" + Fmt.size(t.size) + ")"
-        }.joined(separator: "\n")
-        if targets.count > 12 { list += "\n    ... and \(Fmt.count(targets.count - 12)) more" }
-        let n = targets.count, s = n == 1 ? "" : "s"
-        let head = trash ? "Move \(n) item\(s) (\(Fmt.size(total))) to the Trash?" : "Permanently delete \(n) item\(s) (\(Fmt.size(total)))?"
-        var msg = list + (trash ? "\n\nYou can put them back from the Trash. The space is freed when the Trash is emptied."
-                                : "\n\nThis bypasses the Trash and CANNOT be undone.")
-        if trash && targets.contains(where: { $0.emptyTrash }) { msg += "\n\nThe Trash itself is emptied (its items are deleted for good)." }
-        if targets.contains(where: { t in !t.contentsOnly && !t.emptyTrash && MainWindowController.riskyPaths.contains { PathUtil.isWithin(t.path, $0) } }) {
-            msg += "\n\nWARNING: this includes macOS system, library or application content. Deleting it can break macOS or installed apps."
-        }
         if selfTestDir != nil { runDelete(targets, trash: trash, done); return }
-        let a = NSAlert()
-        a.alertStyle = trash ? .informational : .warning
-        a.messageText = head
-        a.informativeText = msg
-        a.addButton(withTitle: "Cancel")
-        a.addButton(withTitle: trash ? "Move to Trash" : "Delete permanently")
-        if #available(macOS 11.0, *) { a.buttons[1].hasDestructiveAction = !trash }
-        a.beginSheetModal(for: window!) { resp in
-            if resp == .alertSecondButtonReturn { self.runDelete(targets, trash: trash, done) } else { done(nil) }
+        deleteConfirmDialog(targets, trash: trash).show(over: window) { i in
+            if i == 0 { self.runDelete(targets, trash: trash, done) } else { done(nil) }
         }
     }
 
@@ -203,10 +217,6 @@ extension MainWindowController {
     }
 
     func runDelete(_ targets: [DeleteTarget], trash: Bool, showErrors: Bool = true, _ done: @escaping (DeleteJob?) -> Void) {
-        var target = current
-        for t in targets where !t.contentsOnly && !t.emptyTrash {
-            if let dn = attachedDir(t), let c = current, c.isUnder(dn) { target = dn.parent }
-        }
         let dirTargets: [(DeleteTarget, DirNode?)] = targets.filter { $0.isDir }.map { ($0, attachedDir($0)) }
         let fileDirs: [(DeleteTarget, DirNode?)] = targets.filter { !$0.isDir }.map { t -> (DeleteTarget, DirNode?) in
             if let f = t.file, isAttached(f.dir) { return (t, f.dir as DirNode?) }
@@ -214,7 +224,11 @@ extension MainWindowController {
         }
         let before = roots.compactMap { $0.node }.reduce(Int64(0)) { $0 + $1.size }
         let job = DeleteJob()
+        job.trash = trash
         deleteJob = job
+        deleteFinished = []
+        deleteTargetPaths = targets.map { PathUtil.trim($0.path) }
+        deleteRowsRemoved = 0
         beginOwnDelete(targets)
         setBusy(true)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -229,6 +243,11 @@ extension MainWindowController {
             }
             DispatchQueue.main.async {
                 self.whenNoReaders {
+                    // The folder open now (the window stayed browsable), or the nearest one left of it.
+                    var target = self.current
+                    for t in targets where !t.contentsOnly && !t.emptyTrash {
+                        if let dn = self.attachedDir(t), let c = target, c.isUnder(dn) { target = dn.parent }
+                    }
                     for (t, d) in fileDirs {
                         if let d = d, self.isAttached(d), !PathUtil.exists(t.path) { d.removeFileRec(PathUtil.name(t.path)) }
                     }
@@ -262,14 +281,71 @@ extension MainWindowController {
                         self.statusLabel.stringValue = "Freed \(Fmt.size(freed)). \(Fmt.count(job.filesDeleted)) files deleted\(skipped)"
                             + (errors.isEmpty ? "." : ", \(Fmt.count(errors.count)) items could not be deleted.")
                     }
+                    if job.stopped { self.statusLabel.stringValue += "  Stopped: what was not deleted yet stays." }
                     if !errors.isEmpty && showErrors && self.selfTestDir == nil {
-                        var err = errors.prefix(20).map { Fmt.shorten($0, 160) }.joined(separator: "\n")
-                        if errors.count > 20 { err += "\n... and \(Fmt.count(errors.count - 20)) more" }
-                        self.alert("Some items could not be \(trash ? "moved" : "deleted") (in use, protected, or no permission -- Full Disk Access may help):\n\n" + err)
+                        self.deleteErrorsDialog(errors, trash: trash).show(over: self.window) { _ in }
                     }
                     done(job)
                 }
             }
         }
+    }
+
+    // MARK: Live rows while deleting
+
+    /// Polled from the progress timer: rows of the open list whose file or folder was deleted just now (or that sit
+    /// under a deleted folder), and rows whose delete target finished, leave the list; the chart follows.
+    func applyDeleted(_ gone: [String], _ finished: [String]) {
+        for f in finished { deleteFinished.insert(PathUtil.trim(f)) }
+        if gone.isEmpty && finished.isEmpty { return }
+        let set = Set(gone.map { PathUtil.trim($0) })
+        pruneDeletedRows(activePage, set)
+    }
+
+    /// Takes the deleted rows out of a page (a tab opened during the delete, or the open one on a poll).
+    func pruneDeletedRows(_ p: Page, _ gone: Set<String> = []) {
+        let keepView = lastView
+        let n = p.removeRows { self.rowDeleted($0, gone) || (gone.isEmpty && self.rowGoneFromDisk($0)) }
+        lastView = keepView
+        if n > 0 {
+            deleteRowsRemoved += n
+            if activePage === p { refreshChart() }
+        }
+    }
+
+    /// True when the delete running now has removed the row's item: its path (or a folder holding it) was deleted, or
+    /// its delete targets are all finished (a cleanup row of contents only: when its folder was emptied).
+    func rowDeleted(_ it: ItemInfo, _ gone: Set<String> = []) -> Bool {
+        if it.isSummary || it.isGroup { return false }
+        if let ts = it.targets, !ts.isEmpty {
+            return ts.allSatisfy { t in
+                let k = PathUtil.trim(t.path)
+                if deleteFinished.contains(k) { return t.contentsOnly || t.emptyTrash || !PathUtil.exists(k) }
+                return !t.contentsOnly && !t.emptyTrash && pathDeleted(k, gone)
+            }
+        }
+        guard let p = it.fullPath else { return false }
+        return pathDeleted(p, gone)
+    }
+
+    private func pathDeleted(_ p: String, _ gone: Set<String>) -> Bool {
+        var q = PathUtil.trim(p)
+        while !q.isEmpty {
+            if gone.contains(q) { return true }
+            if deleteFinished.contains(q) && !PathUtil.exists(q) { return true }
+            if q == "/" { return false }
+            q = PathUtil.parent(q)
+        }
+        return false
+    }
+
+    /// A row inside one of the delete's targets whose item is no longer on the disk (lists filled during the delete).
+    func rowGoneFromDisk(_ it: ItemInfo) -> Bool {
+        if it.isSummary || it.isGroup || deleteTargetPaths.isEmpty { return false }
+        var path: String?
+        if let ts = it.targets { if ts.count == 1 && !ts[0].contentsOnly && !ts[0].emptyTrash { path = ts[0].path } }
+        else { path = it.fullPath }
+        guard let p = path, deleteTargetPaths.contains(where: { PathUtil.isWithin(p, $0) }) else { return false }
+        return !PathUtil.exists(p)
     }
 }

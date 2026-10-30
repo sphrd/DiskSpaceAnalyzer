@@ -317,10 +317,11 @@ extension MainWindowController {
         cacheRow(&list, "Go build cache", caches + "/go-build", true, "Go's compiled packages. Rebuilt on the next build.")
         cacheRow(&list, "CocoaPods cache", caches + "/CocoaPods", true, devNote)
 
-        // node_modules folders in the scanned trees (outermost only).
+        // node_modules folders of the user's own projects in the scanned trees (outermost only). Never one of an app,
+        // an editor extension or a tool (see isProjectNodeModules).
         let nm = Suggestion("node_modules folders", safe: true, note: "JavaScript packages of projects. Restored with npm install (or yarn / pnpm).")
         for r in scanned {
-            for d in MainWindowController.outermostNamed(r, "node_modules") {
+            for d in MainWindowController.projectNodeModules(r) {
                 let t = DeleteTarget(path: d.fullPath, label: (d.parent?.name ?? "") + "/node_modules", isDir: true, size: d.size, note: "node_modules")
                 t.dir = d
                 nm.targets.append(t)
@@ -388,5 +389,31 @@ extension MainWindowController {
             stack.append(contentsOf: n.children)
         }
         return out
+    }
+
+    /// The outermost node_modules folders under root that belong to a user's project (isProjectNodeModules).
+    static func projectNodeModules(_ root: DirNode) -> [DirNode] {
+        outermostNamed(root, "node_modules").filter { isProjectNodeModules($0.fullPath) }
+    }
+
+    static let systemRoots = ["/Applications", "/System", "/Library", "/usr", "/opt", "/private", "/bin", "/sbin", "/cores"]
+
+    /// A node_modules folder may only be suggested when it belongs to a user's project: the folder holding it has a
+    /// package.json, and nothing on its path is an app bundle (*.app), a system or library folder (/Applications,
+    /// /System, /Library, ~/Library, /usr, /opt, /private, /bin, /sbin, /cores), a hidden folder (~/.vscode, ~/.npm,
+    /// ~/.nvm...) or a folder named extensions or resources. Apps and editors ship their own node_modules (VS Code's
+    /// built-in extensions): deleting those breaks them.
+    static func isProjectNodeModules(_ path0: String) -> Bool {
+        var path = PathUtil.trim(path0)
+        guard PathUtil.name(path) == "node_modules" else { return false }
+        let data = "/System/Volumes/Data"
+        if path.hasPrefix(data + "/") { path = String(path.dropFirst(data.count)) }
+        let home = PathUtil.trim(PathUtil.home)
+        if (systemRoots + [home + "/Library"]).contains(where: { PathUtil.isWithin(path, $0) }) { return false }
+        for c in path.split(separator: "/") {
+            let l = c.lowercased()
+            if c.hasPrefix(".") || l.hasSuffix(".app") || l == "extensions" || l == "resources" { return false }
+        }
+        return FileManager.default.fileExists(atPath: PathUtil.join(PathUtil.parent(path0), "package.json"))
     }
 }

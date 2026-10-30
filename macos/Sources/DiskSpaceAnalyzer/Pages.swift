@@ -57,7 +57,10 @@ extension MainWindowController {
         HoverTip.shared.reset()
         for q in pages { q.root.isHidden = q !== p }
         listPanel.needsLayout = true
-        if p.stale { p.stale = false; p.fill() } else { refreshChart() }
+        if p.stale { p.stale = false; p.fill() } else {
+            if deleteJob != nil { pruneDeletedRows(p) }
+            refreshChart()
+        }
         lastView = p.table
         updateButtons()
     }

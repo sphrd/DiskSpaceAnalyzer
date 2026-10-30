@@ -481,7 +481,7 @@ extension MainWindowController {
 
     func uninstallApp(_ a: InstalledApp, _ done: ((Bool) -> Void)? = nil) {
         if PathUtil.same(a.path, Bundle.main.bundlePath) {
-            alert("Disk Space Analyzer can't uninstall itself. Quit it, then move it to the Trash in Finder.")
+            alert("Disk Space Analyzer can't uninstall itself", "Quit it, then move it to the Trash in Finder.")
             done?(false); return
         }
         guard let items = a.leftovers else {
@@ -503,15 +503,16 @@ extension MainWindowController {
             }
         }
         if appsAuto { go(); return }
-        let al = NSAlert()
-        al.alertStyle = .warning
-        al.messageText = "Uninstall \(a.name)?"
-        var list = items.prefix(12).map { "    " + Fmt.shorten($0.path, 90) + "   (" + ($0.size < 0 ? "—" : Fmt.size($0.size)) + ")" }.joined(separator: "\n")
-        if items.count > 12 { list += "\n    ... and \(Fmt.count(items.count - 12)) more" }
-        al.informativeText = "The app and all its files are moved to the Trash (\(Fmt.size(total))):\n" + list
-        al.addButton(withTitle: "Cancel")
-        al.addButton(withTitle: "Uninstall")
-        al.beginSheetModal(for: window!) { r in if r == .alertSecondButtonReturn { go() } else { done?(false) } }
+        uninstallDialog(a, items, total).show(over: window) { i in if i == 0 { go() } else { done?(false) } }
+    }
+
+    /// Uninstall confirmation: every item of the app on its own line with its size; the red Uninstall button, Cancel
+    /// the default.
+    func uninstallDialog(_ a: InstalledApp, _ items: [AppLeftover], _ total: Int64) -> PromptDialog {
+        let details = items.map { $0.path + "   " + ($0.size < 0 ? "—" : Fmt.size($0.size)) }
+        return PromptDialog(icon: .danger, heading: "Uninstall \(a.name)?",
+                            text: "The app and all its files (\(Fmt.count(items.count)) item\(items.count == 1 ? "" : "s"), \(Fmt.size(total))) are moved to the Trash.",
+                            details: details, buttons: [("Uninstall", .danger), ("Cancel", .secondary)], defaultIndex: 1, cancelIndex: 1)
     }
 
     /// Asks a running app to quit and waits up to 5 s; false (and a message) when it is still running.
@@ -531,7 +532,7 @@ extension MainWindowController {
             if running.allSatisfy({ $0.isTerminated }) { then(true); return }
             if Date() > end {
                 statusLabel.stringValue = "\(a.name) is still running."
-                if !appsAuto { alert("\(a.name) is still running. Quit it, then press Uninstall again.") }
+                if !appsAuto { alert("\(a.name) is still running", "Quit it, then press Uninstall again.") }
                 then(false)
                 return
             }
@@ -567,6 +568,14 @@ extension MainWindowController {
             self.selectApp(a)
             let n = left.count
             self.statusLabel.stringValue = "\(a.name) was partly removed: \(Fmt.count(n)) item\(n == 1 ? "" : "s") could not be moved to the Trash (\(Fmt.size(a.leftoverSize)))."
+            if !self.appsAuto {
+                let admin = left.contains { $0.needsAdmin }
+                self.alert("\(a.name) was partly removed",
+                           "\(Fmt.count(n)) item\(n == 1 ? "" : "s") (\(Fmt.size(a.leftoverSize))) could not be moved to the Trash: in use, protected or access denied. "
+                           + "They stay listed under the app; press Remove leftovers to try again"
+                           + (admin ? " (items that need an administrator: remove them in Finder)." : "."),
+                           details: left.map { $0.path + "  -  " + $0.note })
+            }
             done?(false)
         }
     }
@@ -603,15 +612,12 @@ extension MainWindowController {
             }
         }
         if appsAuto { run(); return }
-        let al = NSAlert()
-        al.messageText = owners.count == 1 ? "Move \(n) leftover\(s) of \(owners[0].name) (\(Fmt.size(total))) to the Trash?"
-                                          : "Move \(n) leftover\(s) of \(owners.count) apps (\(Fmt.size(total))) to the Trash?"
-        var list = picked.prefix(12).map { "    " + Fmt.shorten($0.1.path, 90) }.joined(separator: "\n")
-        if n > 12 { list += "\n    ... and \(Fmt.count(n - 12)) more" }
-        al.informativeText = list + "\n\nYou can put them back from the Trash."
-        al.addButton(withTitle: "Cancel")
-        al.addButton(withTitle: "Move to Trash")
-        al.beginSheetModal(for: window!) { r in if r == .alertSecondButtonReturn { run() } else { done?() } }
+        let heading = owners.count == 1 ? "Move \(Fmt.count(n)) leftover\(s) of \(owners[0].name) to the Trash?"
+                                        : "Move \(Fmt.count(n)) leftover\(s) of \(Fmt.count(owners.count)) apps to the Trash?"
+        let d = PromptDialog(icon: .warn, heading: heading, text: "\(Fmt.size(total)) will be moved to the Trash. You can put the items back from there.",
+                             details: picked.map { $0.1.path + "   " + ($0.1.size < 0 ? "—" : Fmt.size($0.1.size)) },
+                             buttons: [("Move to Trash", .primary), ("Cancel", .secondary)], defaultIndex: 1, cancelIndex: 1)
+        d.show(over: window) { i in if i == 0 { run() } else { done?() } }
     }
 }
 

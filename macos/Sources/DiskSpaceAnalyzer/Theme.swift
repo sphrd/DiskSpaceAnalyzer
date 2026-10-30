@@ -1,5 +1,15 @@
 import AppKit
 
+/// Danger tokens (permanent deletes, uninstall, the delete progress strip). gen_tokens.py leaves out any token defined
+/// here, so src/Theme.cs may define the same names without a clash.
+extension T {
+    static let DANGER = rgb(0xe5534b)
+    static let DANGER_HOVER = rgb(0xf47067)
+    static let DANGER_BG = rgb(0x3b2427)
+    static let DANGER_BORDER = rgb(0x6b2e30)
+    static let DANGER_FG = rgb(0xffb3ad)
+}
+
 /// Fonts, spacing and drawing helpers shared by all views. Colours come from Tokens.swift (generated from src/Theme.cs).
 enum Theme {
     // Design language sizes are given in points on Windows (Segoe UI); macOS uses the system font at the same sizes + 3

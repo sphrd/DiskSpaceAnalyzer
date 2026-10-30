@@ -435,10 +435,44 @@ final class Page: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     /// Replaces the rows (sorted by the current column unless the page keeps its own order).
     func setRows(_ rows: [ItemInfo], _ emptyText: String, keepOrder: Bool = false) {
+        var rows = rows
+        if let f = rowFilter { rows = Page.without(rows, f) }
         items = sortable && !keepOrder ? sorted(rows) : rows
         table.resetHover()
         table.emptyText = rows.isEmpty ? emptyText : nil
         table.reloadData()
+    }
+
+    /// While a delete runs: rows it has deleted already, left out whenever the page is filled.
+    var rowFilter: ((ItemInfo) -> Bool)?
+
+    /// The rows without those for which gone() is true. A group head (a row others belong to) stays while any of its
+    /// rows stays, and goes with the last of them.
+    static func without(_ rows: [ItemInfo], _ gone: (ItemInfo) -> Bool) -> [ItemInfo] {
+        var drop = Set<ObjectIdentifier>()
+        for it in rows where gone(it) { drop.insert(ObjectIdentifier(it)) }
+        if drop.isEmpty { return rows }
+        let heads = Set(rows.compactMap { $0.groupOf.map { ObjectIdentifier($0) } })
+        let keptHeads = Set(rows.filter { !drop.contains(ObjectIdentifier($0)) }.compactMap { $0.groupOf.map { ObjectIdentifier($0) } })
+        for h in heads { if keptHeads.contains(h) { drop.remove(h) } else { drop.insert(h) } }
+        return rows.filter { !drop.contains(ObjectIdentifier($0)) }
+    }
+
+    /// Takes rows out of the list in place (order, selection and scroll position stay); returns how many went.
+    @discardableResult
+    func removeRows(_ gone: (ItemInfo) -> Bool) -> Int {
+        let kept = Page.without(items, gone)
+        let n = items.count - kept.count
+        if n == 0 { return 0 }
+        let sel = Set(selectedItems.map { ObjectIdentifier($0) })
+        items = kept
+        table.resetHover()
+        if items.isEmpty { table.emptyText = empty.isEmpty ? " " : empty }
+        table.reloadData()
+        var keep = IndexSet()
+        for (i, it) in items.enumerated() where sel.contains(ObjectIdentifier(it)) { keep.insert(i) }
+        if keep != table.selectedRowIndexes { table.selectRowIndexes(keep, byExtendingSelection: false) }
+        return n
     }
 
     /// Rows in the current sort order; members of a group (rows with groupOf) stay right under their head, sorted

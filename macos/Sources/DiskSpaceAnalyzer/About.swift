@@ -4,7 +4,8 @@ import AppKit
 /// window, the logo on the left, content in a column on the right, buttons bottom right (the first one primary).
 class AppDialog: NSWindowController, NSWindowDelegate {
     let root = FlatView(frame: NSRect(x: 0, y: 0, width: 470, height: 250))
-    private var buttons: [RoundButton] = []
+    let logo = LogoView(frame: NSRect(x: 30, y: 30, width: 92, height: 92))
+    private(set) var buttons: [RoundButton] = []
     var onClose: (() -> Void)?
     static let contentX: CGFloat = 146
 
@@ -18,7 +19,7 @@ class AppDialog: NSWindowController, NSWindowDelegate {
         w.delegate = self
         root.fill = T.BG
         w.contentView = root
-        root.addSubview(LogoView(frame: NSRect(x: 30, y: 30, width: 92, height: 92)))
+        root.addSubview(logo)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -41,13 +42,15 @@ class AppDialog: NSWindowController, NSWindowDelegate {
         return l
     }
 
-    /// Replaces the buttons, laid out right to left; the first is primary, the others secondary.
-    func setButtons(_ items: [(String, () -> Void)]) {
+    /// Replaces the buttons, laid out right to left; the first is primary, the others secondary (unless kinds says
+    /// otherwise).
+    func setButtons(_ items: [(String, () -> Void)], kinds: [ButtonKind]? = nil) {
         buttons.forEach { $0.removeFromSuperview() }
         buttons = []
         var x = root.bounds.width - 24
         for (i, item) in items.enumerated() {
-            let b = RoundButton(item.0, i == 0 ? .primary : .secondary, item.1)
+            let kind = kinds.flatMap { i < $0.count ? $0[i] : nil } ?? (i == 0 ? .primary : .secondary)
+            let b = RoundButton(item.0, kind, item.1)
             if i == 0 { b.minChars = 8 }
             let s = b.preferredSize
             x -= s.width

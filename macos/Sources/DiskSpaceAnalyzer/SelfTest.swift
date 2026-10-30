@@ -32,7 +32,7 @@ final class Steps {
     }
 }
 
-/// Builds the self-test folder: 9 files in 8 folders, two identical files, a node_modules folder.
+/// Builds the self-test folder: 10 files in 8 folders, two identical files, a project (package.json) with node_modules.
 enum SelfTest {
     static func prepare(_ dir0: String) -> String {
         var dir = (dir0 as NSString).expandingTildeInPath
@@ -56,6 +56,7 @@ enum SelfTest {
         write("C/dup1.bin", dup)
         write("D/dup2.bin", dup)
         write("C/other.bin", random(200000))
+        write("P/package.json", Data("{\"name\": \"p\", \"version\": \"1.0.0\"}".utf8))
         write("P/node_modules/x/index.js", random(4000))
         return dir
     }
@@ -115,7 +116,7 @@ final class SelfTestRun {
         }
         steps.then {
             let top = self.root
-            self.check(top != nil && top!.files == 9 && top!.dirs == 8, "scan: \(top?.files ?? -1) files, \(top?.dirs ?? -1) folders (expected 9, 8)")
+            self.check(top != nil && top!.files == 10 && top!.dirs == 8, "scan: \(top?.files ?? -1) files, \(top?.dirs ?? -1) folders (expected 10, 8)")
             // iCloud items are never downloaded: the process-wide policy is set at start-up.
             self.check(Dataless.policyResult == 0 && Dataless.processPolicy == Dataless.materializeOff,
                        "iopolicy: setiopolicy_np(materialize dataless files, process, off) returned \(Dataless.policyResult) (errno \(Dataless.policyErrno)), policy now \(Dataless.processPolicy)")
@@ -124,8 +125,8 @@ final class SelfTestRun {
             s.alsoBlocked = [self.P("D")]
             let r = s.run(self.dir)
             let d = r.child("D")
-            self.check(d != nil && d!.skipped == .needsAccess && d!.files == 0 && d!.displayName.hasSuffix("[needs Full Disk Access]") && r.files == 8 && r.dirs == 8,
-                       "protected folder listed but not entered (\(r.files) files, \(r.dirs) folders; expected 8, 8)")
+            self.check(d != nil && d!.skipped == .needsAccess && d!.files == 0 && d!.displayName.hasSuffix("[needs Full Disk Access]") && r.files == 9 && r.dirs == 8,
+                       "protected folder listed but not entered (\(r.files) files, \(r.dirs) folders; expected 9, 8)")
             let granted = FullDiskAccess.granted
             let blocked = FullDiskAccess.blocked(for: "/")
             let desktop = PathUtil.home + "/Desktop"
@@ -138,12 +139,12 @@ final class SelfTestRun {
         }
         steps.waitUntil(20) {
             guard let a = self.find("A"), let e = self.find("E/deep"), let r = self.root else { return false }
-            return a.localFiles == 3 && e.files == 1 && r.files == 11
+            return a.localFiles == 3 && e.files == 1 && r.files == 12
         }
         steps.then {
             let a = self.find("A"), e = self.find("E/deep")
             self.check(a != nil && a!.localFiles == 3, "live: new file in A noticed")
-            self.check(e != nil && e!.files == 1 && self.root?.files == 11, "live: new folder E/deep with its file noticed (total \(self.root?.files ?? -1) files)")
+            self.check(e != nil && e!.files == 1 && self.root?.files == 12, "live: new folder E/deep with its file noticed (total \(self.root?.files ?? -1) files)")
             // Duplicates: dup1.bin and dup2.bin are identical; other.bin has the same size but other content.
             if let r = self.root { w.selectDir(r) }
             w.dupeMin.selectedIndex = 3
@@ -163,6 +164,36 @@ final class SelfTestRun {
                 self.check(nm != nil && nm!.targets.count == 1 && PathUtil.same(nm!.targets[0].path, self.P("P/node_modules")), "suggestions: node_modules of P found")
                 next()
             })
+        }
+        steps.then {
+            // Safety: only node_modules of the user's own projects are suggested, never those inside an app bundle or an
+            // editor's extensions (deleting VS Code's built-in extension once broke it on Windows).
+            let nmDir = self.dir + "-nm"
+            let fm = FileManager.default
+            try? fm.removeItem(atPath: nmDir)
+            func project(_ rel: String, packageJson: Bool = true) -> String {
+                let p = nmDir + "/" + rel
+                try? fm.createDirectory(atPath: p + "/node_modules/pkg", withIntermediateDirectories: true)
+                fm.createFile(atPath: p + "/node_modules/pkg/index.js", contents: Data(count: 3000))
+                if packageJson { fm.createFile(atPath: p + "/package.json", contents: Data("{\"name\": \"x\"}".utf8)) }
+                return p + "/node_modules"
+            }
+            let own = project("work/my-project")
+            let inApp = project("X.app/Contents/Resources/app")
+            let inExt = project(".vscode/extensions/foo")
+            let noPackage = project("loose", packageJson: false)
+            let found = MainWindowController.projectNodeModules(Scanner().run(nmDir)).map { $0.fullPath }
+            self.check(found.count == 1 && PathUtil.same(found[0], own) && MainWindowController.isProjectNodeModules(own),
+                       "node_modules safety: a project's node_modules (package.json next to it) is suggested (\(found.count) found)")
+            self.check(!MainWindowController.isProjectNodeModules(inApp) && !found.contains { PathUtil.same($0, inApp) },
+                       "node_modules safety: not inside an app bundle (X.app/Contents/Resources/app)")
+            self.check(!MainWindowController.isProjectNodeModules(inExt) && !found.contains { PathUtil.same($0, inExt) },
+                       "node_modules safety: not inside an editor's extensions (.vscode/extensions/foo)")
+            self.check(!MainWindowController.isProjectNodeModules(noPackage)
+                       && !MainWindowController.isProjectNodeModules(PathUtil.home + "/Library/foo/node_modules")
+                       && !MainWindowController.isProjectNodeModules("/Applications/Code.app/Contents/Resources/app/node_modules"),
+                       "node_modules safety: not without package.json, under ~/Library or /Applications")
+            try? fm.removeItem(atPath: nmDir)
         }
         var before: Int64 = 0
         let ci = ProcessInfo.processInfo.environment["CI"] != nil
@@ -206,7 +237,77 @@ final class SelfTestRun {
                 let c2 = self.find("C")
                 self.check(!PathUtil.exists(self.P("C/other.bin")) && c2 != nil && !(c2!.fileList ?? []).contains { $0.name == "other.bin" } && c2!.localFiles == 1,
                            "file delete: other.bin gone from disk and index")
-                self.check(self.root?.files == 4, "totals after deletes: \(self.root?.files ?? -1) files (expected 4)")
+                self.check(self.root?.files == 5, "totals after deletes: \(self.root?.files ?? -1) files (expected 5)")
+                next()
+            }
+        }
+        // Deleting: the themed confirmation, then the delete strip (danger colours) while rows leave the open list.
+        steps.then {
+            let fm = FileManager.default
+            for i in 1...4 {
+                try? fm.createDirectory(atPath: self.P("S/s\(i)"), withIntermediateDirectories: true)
+                for k in 1...15 { fm.createFile(atPath: self.P("S/s\(i)/f\(k).bin"), contents: Data(count: 2000)) }
+            }
+        }
+        steps.waitUntil(20) { (1...4).allSatisfy { self.find("S/s\($0)")?.files == 15 } }
+        steps.add { next in
+            guard let s = self.find("S"), s.children.count == 4 else { self.check(false, "delete strip: folder S not noticed"); next(); return }
+            if let i = w.pages.firstIndex(where: { $0 === w.pContents }) { w.viewTabs.selectedIndex = i }
+            w.selectDir(s)
+            let rows = { w.pContents.items.filter { $0.isDir && $0.dir?.parent === s }.count }
+            let before = rows()
+            let targets = s.children.map { c -> DeleteTarget in
+                let t = DeleteTarget(path: c.fullPath, label: c.name, isDir: true, size: c.size)
+                t.dir = c
+                return t
+            }
+            let total = targets.reduce(Int64(0)) { $0 + $1.size }
+            // The confirmation is the app's own dialog: a details box with a line per item, the red Delete permanently
+            // button, Cancel the default (Return cancels).
+            let d = w.deleteConfirmDialog(targets, trash: false)
+            let lines = d.detailsView?.string.components(separatedBy: "\n") ?? []
+            self.check(d.detailLines.count == 4 && lines.count == 4 && d.detailsBox != nil && lines[0].hasSuffix("   " + Fmt.size(targets[0].size))
+                       && d.buttonTitles.first == "Delete permanently" && d.buttonKinds.first == .danger && d.icon == .danger
+                       && d.heading == "Delete 4 items permanently?" && d.text == "\(Fmt.size(total)) will be deleted. This bypasses the Trash and cannot be undone."
+                       && d.window?.backgroundColor == T.BG && d.buttonTitles[d.defaultIndex] == "Cancel" && d.defaultIndex == d.cancelIndex,
+                       "prompt: themed delete confirmation \"\(d.heading)\" with \(lines.count) detail lines, buttons \(d.buttonTitles) (\(d.buttonKinds.first == .danger ? "danger" : "not danger") primary, default \(d.buttonTitles[d.defaultIndex]))")
+            var answer = -1
+            d.show(over: w.window) { answer = $0 }
+            d.handleKey(36)
+            self.check(answer == d.cancelIndex && PromptDialog.open.isEmpty && (1...4).allSatisfy { PathUtil.exists(self.P("S/s\($0)")) },
+                       "prompt: Return in the confirmation cancels (nothing deleted)")
+            let errs = (1...25).map { self.P("X/locked\($0).bin") + "  -  Permission denied" }
+            let e = w.deleteErrorsDialog(errs, trash: false)
+            self.check(e.heading == "25 items could not be deleted" && e.text.hasPrefix("They are in use or access was denied.") && e.icon == .warn
+                       && e.detailLines == errs && (e.detailsView?.string.components(separatedBy: "\n").count ?? 0) == 25,
+                       "prompt: delete errors \"\(e.heading)\" list all 25 items")
+            var sawStrip = false, sawDanger = false, early = -1, status = "", sawBar = false
+            var finished = false
+            func poll() {
+                if finished { return }
+                if w.deleteJob != nil {
+                    let bar = w.deleteBar
+                    if !bar.isHidden && bar.frame.height > 0 { sawStrip = true }
+                    if bar.danger && bar.fillColor == T.DANGER_BG && bar.outlineColor == T.DANGER_BORDER && bar.barColor == T.DANGER
+                        && bar.spinner.color == T.DANGER && bar.cancelButton.title == "Stop" { sawDanger = true }
+                    if bar.status.hasPrefix("Deleting permanently: ") && bar.status.hasSuffix(" freed") && status.isEmpty && bar.fraction > 0 { status = bar.status }
+                    if bar.fraction > 0 && bar.fraction < 1 { sawBar = true }
+                    let left = rows()
+                    if left < before && early < 0 { early = before - left }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { poll() }
+            }
+            DeleteJob.throttle = 25_000
+            poll()
+            w.confirmAndDelete(targets, trash: false) { job in
+                finished = true
+                DeleteJob.throttle = 0
+                self.check(sawStrip && sawDanger && sawBar && !status.isEmpty,
+                           "delete strip: shown while deleting, red outline on dark red, red spinner and bar, Stop button (status \"\(status)\")")
+                self.check(early > 0, "delete strip: rows left the Contents list while the delete ran (\(early) of \(before) gone before it finished)")
+                let stale = w.pContents.items.filter { $0.fullPath.map { !PathUtil.exists($0) } ?? false }
+                self.check(job != nil && w.deleteBar.isHidden && stale.isEmpty && rows() == 0 && (1...4).allSatisfy { !PathUtil.exists(self.P("S/s\($0)")) },
+                           "delete strip: hidden afterwards; the list holds no deleted rows (\(w.pContents.items.count) rows)")
                 next()
             }
         }
@@ -713,6 +814,65 @@ final class ShotRun {
         steps.then {
             if let v = self.fda?.window?.contentView { self.save(v, "\(w.pages.count + 5)-full-disk-access") }
             self.fda?.close()
+        }
+        // Deleting: the themed confirmation, the delete strip mid-delete (rows leaving the Delete list), the error report.
+        let demo = dir + "/delete-demo"
+        steps.then {
+            let fm = FileManager.default
+            try? fm.removeItem(atPath: demo)
+            w.basket.removeAll()
+            for i in 1...6 {
+                let f = demo + "/project-\(i)/build-cache"
+                try? fm.createDirectory(atPath: f, withIntermediateDirectories: true)
+                for k in 1...40 { fm.createFile(atPath: f + "/chunk-\(k).bin", contents: Data(count: 4096 * i)) }
+                w.addTarget(DeleteTarget(path: f, label: "project-\(i)/build-cache", isDir: true, size: Scanner().run(f).size))
+            }
+            w.basketChanged()
+            w.viewTabs.selectedIndex = w.pages.firstIndex { $0 === w.pBasket } ?? 0
+        }
+        steps.wait(1)
+        steps.then { DeleteJob.throttle = 20_000; w.deleteBasket(trash: false) }
+        steps.wait(1)
+        steps.then {
+            if let d = PromptDialog.open.last, let v = d.window?.contentView {
+                self.save(v, "delete-confirm")
+                print("delete-confirm: \"\(d.heading)\" \(d.detailLines.count) lines, buttons \(d.buttonTitles)")
+                d.finish(0)
+            } else { print("delete-confirm: no prompt shown") }
+        }
+        steps.wait(2.5)
+        steps.then {
+            self.shot("deleting")
+            print("deleting: \(w.deleteBar.status) | \(w.deleteBar.detail) | bar \(w.deleteBar.fraction) | \(w.pBasket.items.count) rows left")
+        }
+        steps.waitUntil(60) { w.deleteJob == nil && !w.busy }
+        steps.then {
+            DeleteJob.throttle = 0
+            // A folder whose files cannot be deleted (read-only subfolders), for the error report.
+            let fm = FileManager.default
+            let locked = demo + "/locked"
+            for s in ["logs", "data"] {
+                try? fm.createDirectory(atPath: locked + "/" + s, withIntermediateDirectories: true)
+                for k in 1...4 { fm.createFile(atPath: locked + "/\(s)/file-\(k).bin", contents: Data(count: 2048)) }
+                chmod(locked + "/" + s, 0o555)
+            }
+            w.basket.removeAll()
+            w.addTarget(DeleteTarget(path: locked, label: "locked", isDir: true, size: Scanner().run(locked).size))
+            w.basketChanged()
+            w.deleteBasket(trash: false)
+        }
+        steps.wait(1)
+        steps.then { PromptDialog.open.last?.finish(0) }
+        steps.waitUntil(30) { w.deleteJob == nil && !PromptDialog.open.isEmpty }
+        steps.wait(1)
+        steps.then {
+            if let d = PromptDialog.open.last, let v = d.window?.contentView {
+                self.save(v, "delete-errors")
+                print("delete-errors: \"\(d.heading)\" \(d.detailLines.count) lines")
+                d.finish(0)
+            } else { print("delete-errors: no prompt shown") }
+            for s in ["logs", "data"] { chmod(demo + "/locked/" + s, 0o755) }
+            try? FileManager.default.removeItem(atPath: demo)
         }
         steps.run { exit(0) }
     }

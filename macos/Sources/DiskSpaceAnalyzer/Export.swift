@@ -70,7 +70,7 @@ extension MainWindowController {
             guard let self = self else { return }
             if let e = err {
                 self.statusLabel.stringValue = "Export failed."
-                self.alert("Could not save the export:\n" + e)
+                self.alert("Could not save the export", e)
                 return
             }
             self.statusLabel.stringValue = "Exported to " + url.path
