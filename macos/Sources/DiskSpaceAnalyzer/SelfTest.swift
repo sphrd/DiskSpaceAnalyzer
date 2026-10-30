@@ -182,9 +182,11 @@ final class SelfTestRun {
             let inApp = project("X.app/Contents/Resources/app")
             let inExt = project(".vscode/extensions/foo")
             let noPackage = project("loose", packageJson: false)
-            let found = MainWindowController.projectNodeModules(Scanner().run(nmDir)).map { $0.fullPath }
+            let scanned = Scanner().run(nmDir)
+            // Held while the paths are read: a node's parent is a weak reference.
+            let found: [String] = withExtendedLifetime(scanned) { MainWindowController.projectNodeModules(scanned).map { $0.fullPath } }
             self.check(found.count == 1 && PathUtil.same(found[0], own) && MainWindowController.isProjectNodeModules(own),
-                       "node_modules safety: a project's node_modules (package.json next to it) is suggested (found \(found), expected \(own), allowed \(MainWindowController.isProjectNodeModules(own)))")
+                       "node_modules safety: a project's node_modules (package.json next to it) is suggested (\(found.count) found: \(found.map { String($0.dropFirst(nmDir.count)) }.joined(separator: ", ")))")
             self.check(!MainWindowController.isProjectNodeModules(inApp) && !found.contains { PathUtil.same($0, inApp) },
                        "node_modules safety: not inside an app bundle (X.app/Contents/Resources/app)")
             self.check(!MainWindowController.isProjectNodeModules(inExt) && !found.contains { PathUtil.same($0, inExt) },
