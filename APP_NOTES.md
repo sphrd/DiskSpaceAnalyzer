@@ -465,3 +465,6 @@ patterns (Part 3) are applied through the WinForms mapping below.
   largest items always get their own slice, plus every item of at least 2 % (7.2 degrees), at most 50.
 - v1.8.1 (2026-10-29): chart: every item of at least 2 % (7.2 degrees) gets its own slice in true proportion; all smaller
   items together form one grey slice (no more invisible hairline slices); README shows Suggestions and Apps.
+- v1.8.2 (2026-10-30): safety: node_modules suggestions only for projects (package.json), never inside installed programs or
+  tools; deleting shows a red progress strip with Stop and the open list empties live; every prompt is a themed dialog with a
+  warning sign and the full list of items in a scrollable box.
